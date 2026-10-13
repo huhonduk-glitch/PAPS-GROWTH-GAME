@@ -1,0 +1,24 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>튼튼몬 그림 모음 (개발용)</title>
+<style>body{font-family:sans-serif;background:#E7EEF4;margin:16px}table{border-collapse:collapse}td,th{padding:4px;text-align:center;font-size:12px}canvas{width:216px;image-rendering:pixelated;border-radius:8px}</style></head>
+<body><h3>튼튼몬 그림 모음 — 단계 × 계통 (개발용, 배포 안 됨)</h3><table id="t"></table>
+<script type="module">
+import { draw, W, H } from '/src/draw.js';
+import { LINES, STAGES, SPECIES } from '/src/game.js';
+const lines = Object.keys(LINES), t = document.getElementById('t');
+const mood = new URLSearchParams(location.search);
+const hp = Number(mood.get('hp') || 80), cheer = mood.has('cheer'), time = Number(mood.get('t') || 1000);
+t.innerHTML = '<tr><th></th>' + lines.map(l => `<th>${LINES[l].n}</th>`).join('') + '</tr>';
+STAGES.forEach(([xp, n], st) => {
+  const tr = document.createElement('tr'); tr.innerHTML = `<th>${n}</th>`;
+  lines.forEach(l => {
+    const td = document.createElement('td'); const c = document.createElement('canvas'); c.width = W; c.height = H;
+    draw(c.getContext('2d'), { line: l, branch: st >= 4 ? l : null, xp, hp, alive: true, height: 165 }, time, { cheer });
+    const sp = SPECIES[st]; td.append(c, document.createElement('br'), st ? (typeof sp === 'string' ? sp : sp[l]) : LINES[l].n + ' 알');
+    tr.appendChild(td);
+  });
+  t.appendChild(tr);
+});
+const tr = document.createElement('tr'); tr.innerHTML = '<th>소멸</th>';
+const td = document.createElement('td'); const c = document.createElement('canvas'); c.width = W; c.height = H;
+draw(c.getContext('2d'), { line: 'wind', xp: 500, hp: 0, alive: false, height: 165 }, time); td.appendChild(c); tr.appendChild(td); t.appendChild(tr);
+</script></body></html>

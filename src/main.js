@@ -1,50 +1,159 @@
 // 화면: 버튼 연결 · 그리기 반복 · 저장. 게임 계산은 game.js, 그림은 draw.js.
 import './style.css';
 import {
-  STAGES, EX_KINDS, SLOTS, CHECKS, RULES, clamp, addDay, daysBetween, todayKey, stageOf,
-  exMinutes, balancedCount, statsFromInputs, newPet, newState, evaluate, certExercise, certMeal,
+  STAGES, LINES, STAT_KEYS, STAT_NAMES, EX_KINDS, CAT_NAMES, INTENSITY, PROOFS, SLOTS, PLACES, GROUPS, GROUP_KEYS, DRINKS,
+  SCHOOL_LUNCH, SPECIES, RULES, clamp, addDay, daysBetween, todayKey, keyOf, fromMin, stageOf, kindOf, exMinutes, cappedMinutes,
+  balancedCount, dayGroups, statsFromInputs, lineFromStats, branchFromTraining, speciesName, newPet, newState, evaluate,
+  certExercise, certMeal, weekId, weekCounts, weekMissions, streak, remeasure,
 } from './game.js';
 import { draw } from './draw.js';
 import { load, save as store, clear } from './storage.js';
 
 const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 let S = load();
-const sel = { ex: '달리기', slot: '점심', checks: new Set(['채소·과일', '단백질', '밥·빵·면']) };
-const photos = { ex: null, meal: null };
+const sel = {
+  ex: '달리기', int: 2, warm: false, proof: 'self',
+  slot: '점심', place: '집밥', groups: new Set(SCHOOL_LUNCH), drink: '물',
+};
+const photos = { ex: null, meal: null }; // {data, ok}
 let pendingOffset = 0;
+let setupMode = 'new'; // 'new' | 'remeasure'
 
 const today = () => todayKey(S ? S.offset : 0);
+/** 실제 시각(분). 체험용으로 날을 넘긴 동안은 시각 검사를 하지 않음 */
+const nowMin = () => (S && S.offset ? null : new Date().getHours() * 60 + new Date().getMinutes());
 function save() { if (!store(S)) toast('이 브라우저에서는 저장이 안 돼요. 창을 닫으면 사라져요.'); }
 
-/* ---------- 만들기 폼 ---------- */
+/* ---------- 만들기 · 다시 재기 ---------- */
 function formInputs() {
   const g = id => Number($(id).value);
-  return {
-    total: g('sTotal'), cardio: g('sCardio'), strength: g('sStr'), flex: g('sFlex'), power: g('sPow'),
-    height: parseFloat($('sH').value), weight: parseFloat($('sW').value), muscle: parseFloat($('sM').value),
-  };
+  return { cardio: g('sCardio'), strength: g('sStr'), flex: g('sFlex'), power: g('sPow'), height: parseFloat($('sH').value), weight: parseFloat($('sW').value), muscle: parseFloat($('sM').value) };
+}
+function renderLineBox() {
+  const st = statsFromInputs(formInputs()), line = lineFromStats(st), L = LINES[line];
+  const top = STAT_KEYS.reduce((a, k) => (st[k] > st[a] ? k : a), STAT_KEYS[0]);
+  const why = line === 'light' ? '체력이 고르게 좋아요' : `가장 강한 체력: ${STAT_NAMES[top]} ${st[top]}`;
+  const ratio = st.muscleRatio === null ? '' : `<div class="hint">근육 비율 ${(st.muscleRatio * 100).toFixed(0)}% → 근력 능력치에 반영</div>`;
+  const bars = STAT_KEYS.map(k => `<span>${STAT_NAMES[k]}</span><span class="bar"><i style="width:${st[k] / 1.5}%"></i></span><span>${st[k]}</span>`).join('');
+  const now = setupMode === 'remeasure' && S ? `<div class="hint">계통은 처음 그대로(${LINES[S.pet.line].n}). 운동으로 오른 능력치는 남고, 기준값만 새로 바뀌어요.</div>` : '';
+  $('lineBox').innerHTML = `<div class="ln"><span class="sw" style="background:rgb(${L.c})"></span>${L.n} 계통</div><div>${L.desc} · ${why}</div>${ratio}<div class="mini">${bars}</div>${now}`;
+}
+function openSetup(mode) {
+  setupMode = mode;
+  $('setupTitle').textContent = mode === 'new' ? '내 튼튼몬 만들기' : 'PAPS·인바디 다시 넣기';
+  $('nameRow').hidden = mode !== 'new';
+  $('bCreate').textContent = mode === 'new' ? '알 받기' : '새 기록으로 바꾸기';
+  $('bSetupCancel').hidden = mode === 'new';
+  closePanels(); $('setup').hidden = false; renderLineBox();
+  if (mode !== 'new') $('setup').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-/* ---------- 인증 ---------- */
+/* ---------- 운동 인증 ---------- */
+function exInput() {
+  const k = kindOf(sel.ex), num = id => (($(id) || {}).value ? Number($(id).value) : 0);
+  const amount = k.m === 'km' ? { km: num('amKm') } : k.m === 'steps' ? { steps: num('amSteps') } : k.m === 'count' ? { count: num('amCount') } : k.m === 'reps' ? { sets: num('amSets'), reps: num('amReps') } : {};
+  return {
+    kind: sel.ex, min: parseInt($('exMin').value), int: sel.int, start: $('exStart').value || null, amount, warm: sel.warm,
+    proof: sel.proof, photo: photos.ex ? photos.ex.data : null, photoOk: photos.ex ? photos.ex.ok : false,
+  };
+}
+const EX_FAIL = {
+  short: `${RULES.exMinCert}분 이상부터 인증할 수 있어요.`,
+  photo: '이 인증 방법은 사진이 있어야 해요.',
+  overlap: '이미 인증한 운동과 시간이 겹쳐요.',
+  future: '아직 안 끝난 운동이에요. 끝나고 인증해 주세요.',
+  late: '자정을 넘기는 운동은 오늘 끝난 부분까지만 적어 주세요.',
+};
+function renderExAmount() {
+  const k = kindOf(sel.ex), box = $('exAmount');
+  const field = (id, label, ph) => `<label>${label}<input id="${id}" type="number" inputmode="decimal" min="0" placeholder="${ph}"></label>`;
+  box.innerHTML = k.m === 'km' ? field('amKm', '거리 (km, 선택)', '예: 3.5')
+    : k.m === 'steps' ? field('amSteps', '걸음 수 (선택)', '예: 4000')
+      : k.m === 'count' ? field('amCount', '횟수 (선택)', '예: 500')
+        : k.m === 'reps' ? field('amSets', '세트 (선택)', '예: 3') + field('amReps', '세트당 횟수', '예: 12') : '';
+  box.hidden = !box.innerHTML;
+  box.querySelectorAll('input').forEach(i => i.addEventListener('input', renderExCalc));
+  $('exKindHint').textContent = `${CAT_NAMES[k.cat]} 운동${k.cat === 'sport' ? ' (심폐·순발 반씩)' : ''}${k.hint ? ' · ' + k.hint : ''}${k.m !== 'none' ? ' · 기록을 적으면 +10%' : ''}`;
+}
+function renderExCalc() {
+  if (!S) return;
+  const e = exInput();
+  $('exPhotoRow').hidden = sel.proof === 'self';
+  const T = structuredClone(S), r = certExercise(T, today(), e, nowMin());
+  const L = S.logs[today()], used = cappedMinutes(L);
+  let h;
+  if (!r.ok) h = `<span class="warn">${EX_FAIL[r.reason]}</span>`;
+  else {
+    h = `예상: <b>경험치 +${r.gain}</b> · 체력 +${Math.round(r.counted / 6)} · 점수에 들어가는 시간 ${r.counted}분`;
+    if (r.parts.length) h += ` <span class="hint">(${r.parts.join(' · ')})</span>`;
+    if (r.flag) h += `<br><span class="warn">확인 필요: ${esc(r.flag)} → 보너스 없이 받아요</span>`;
+    if (r.counted < r.min) h += `<br><span class="hint">오늘 이미 ${used}분 — 하루 ${RULES.exDailyCap}분까지만 점수예요</span>`;
+    if (photos.ex && !photos.ex.ok) h += '<br><span class="hint">오늘 찍은 사진이 아니라서 사진 보너스는 없어요</span>';
+  }
+  $('exCalc').innerHTML = h;
+}
 function onCertEx() {
-  const r = certExercise(S, today(), { kind: sel.ex, min: parseInt($('exMin').value), int: Number($('exInt').value), photo: photos.ex });
-  if (!r.ok) { toast(`${RULES.exMinCert}분 이상부터 인증할 수 있어요.`); return; }
+  const e = exInput();
+  const r = certExercise(S, today(), e, nowMin());
+  if (!r.ok) { toast(EX_FAIL[r.reason]); return; }
   save(); closePanels(); render();
-  if (r.grew) say(`${S.pet.name}(이)가 ${STAGES[stageOf(S.pet.xp)][1]}(으)로 자랐어요!`, true);
+  if (r.grew) say(`${S.pet.name}(이)가 ${speciesName(S.pet)}(으)로 자랐어요!`, true);
   else if (r.counted === 0) say(`오늘은 ${RULES.exDailyCap}분을 다 채웠어요. 이제 푹 쉬어요.`);
-  else say(`${sel.ex} ${r.min}분 인증! 경험치 +${r.gain}`);
+  else say(`${sel.ex} ${r.min}분 인증! 경험치 +${r.gain}${r.flag ? ' (확인 필요)' : ''}`);
   photos.ex = null; $('exPrev').hidden = true; $('exPhoto').value = '';
 }
+let startTouched = false;
+function openEx() {
+  const n = nowMin();
+  const mins = parseInt($('exMin').value) || 30;
+  if (n !== null) $('exStart').value = fromMin(Math.max(0, n - mins));
+  startTouched = false;
+  renderExAmount(); openPanel('exPanel'); renderExCalc();
+}
+
+/* ---------- 식단 인증 ---------- */
+function mealInput() {
+  return { slot: sel.slot, place: sel.place, groups: sel.groups, drink: sel.drink, photo: photos.meal ? photos.meal.data : null, photoOk: photos.meal ? photos.meal.ok : false };
+}
+function renderMealCalc() {
+  if (!S) return;
+  const T = structuredClone(S), r = certMeal(T, today(), mealInput());
+  const had = dayGroups(S.logs[today()]), after = dayGroups(T.logs[today()]);
+  $('mealToday').innerHTML = '오늘 먹은 식품군 ' + GROUP_KEYS.map(g => `<span class="${after.has(g) ? 'on' : ''}">${g}${after.has(g) && !had.has(g) ? ' +' : ''}</span>`).join('');
+  if (!r.ok) { $('mealCalc').innerHTML = `<span class="warn">${sel.slot}은 이미 인증했어요.</span>`; return; }
+  const tierTxt = { great: '아주 좋은 한 끼', bal: '균형식', plain: '한 가지 더 곁들여 봐요' }[r.tier];
+  let h = `식품군 ${r.n}가지 · ${tierTxt} → 예상 <b>경험치 +${r.gain}</b>`;
+  if (r.parts.length) h += ` <span class="hint">(${r.parts.join(' · ')})</span>`;
+  if (photos.meal && !photos.meal.ok) h += '<br><span class="hint">오늘 찍은 사진이 아니라서 사진 보너스는 없어요</span>';
+  $('mealCalc').innerHTML = h;
+}
 function onCertMeal() {
-  const r = certMeal(S, today(), { slot: sel.slot, checks: sel.checks, photo: photos.meal });
+  const r = certMeal(S, today(), mealInput());
   if (!r.ok) { toast(`${sel.slot}은 이미 인증했어요.`); return; }
   save(); closePanels(); render();
-  if (r.grew) say(`${S.pet.name}(이)가 ${STAGES[stageOf(S.pet.xp)][1]}(으)로 자랐어요!`, true);
-  else say(r.balanced ? `${sel.slot} 균형식 인증! 경험치 +${r.gain}` : `${sel.slot} 인증! 다음엔 한 가지 더 곁들여 봐요.`);
+  if (r.grew) say(`${S.pet.name}(이)가 ${speciesName(S.pet)}(으)로 자랐어요!`, true);
+  else if (r.rainbow) say(`무지개 식단 완성! 오늘 식품군 5가지를 다 먹었어요. +${r.gain}`, true);
+  else say(r.tier === 'plain' ? `${sel.slot} 인증! 다음엔 한 가지 더 곁들여 봐요. +${r.gain}` : `${sel.slot} ${r.tier === 'great' ? '아주 좋은 한 끼' : '균형식'} 인증! 경험치 +${r.gain}`);
   photos.meal = null; $('mealPrev').hidden = true; $('mealPhoto').value = '';
 }
+function slotByTime() {
+  const h = new Date().getHours();
+  return h >= 5 && h < 10 ? '아침' : h >= 11 && h < 15 ? '점심' : h >= 17 && h < 21 ? '저녁' : '간식';
+}
+function openMeal() {
+  const L = S.logs[today()];
+  const done = new Set(L ? L.meals.map(m => m.slot) : []);
+  const pick = slotByTime();
+  sel.slot = !done.has(pick) ? pick : SLOTS.find(s => !done.has(s)) || pick;
+  syncChips(); openPanel('mealPanel'); renderMealCalc();
+}
+
+/* ---------- 사진 ---------- */
+/** 200px JPEG 로 줄임. 오늘 찍은(저장된) 사진인지도 봄 */
 function shrinkPhoto(file, cb) {
+  const ok = keyOf(new Date(file.lastModified || 0)) === todayKey(0);
   const r = new FileReader();
   r.onload = () => {
     const im = new Image();
@@ -53,27 +162,34 @@ function shrinkPhoto(file, cb) {
       const c = document.createElement('canvas');
       c.width = Math.round(im.width * s); c.height = Math.round(im.height * s);
       c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
-      cb(c.toDataURL('image/jpeg', .7));
+      cb({ data: c.toDataURL('image/jpeg', 0.7), ok });
     };
+    im.onerror = () => toast('사진을 읽을 수 없어요.');
     im.src = r.result;
   };
   r.readAsDataURL(file);
 }
 
-/* ---------- 화면 ---------- */
-function chips(box, items, get, setv, multi) {
+/* ---------- 고르기 단추 ---------- */
+const chipSets = [];
+function chips(box, items, isOn, onTap) {
   box.innerHTML = '';
   items.forEach(it => {
-    const b = document.createElement('button'); b.className = 'chip'; b.type = 'button'; b.textContent = it;
-    const sync = () => b.setAttribute('aria-pressed', multi ? get().has(it) : get() === it); sync();
-    b.onclick = () => { setv(it); [...box.children].forEach(x => x._sync()); }; b._sync = sync;
+    const b = document.createElement('button'); b.className = 'chip'; b.type = 'button';
+    b.innerHTML = it.html || esc(it.label);
+    b._sync = () => b.setAttribute('aria-pressed', isOn(it.v));
+    b.onclick = () => { onTap(it.v); syncChips(); };
     box.appendChild(b);
   });
+  chipSets.push(box);
 }
+function syncChips() { chipSets.forEach(box => [...box.children].forEach(b => b._sync())); }
+
+/* ---------- 화면 ---------- */
 function openPanel(id) { closePanels(); $(id).hidden = false; $(id).scrollIntoView({ behavior: 'smooth', block: 'start' }); if (id === 'infoPanel') renderInfo(); }
-function closePanels() { ['exPanel', 'mealPanel', 'infoPanel'].forEach(i => $(i).hidden = true); }
+function closePanels() { ['exPanel', 'mealPanel', 'infoPanel'].forEach(i => $(i).hidden = true); if (S) $('setup').hidden = true; }
 let toastT;
-function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600); }
+function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2800); }
 let cheerUntil = 0;
 function say(m, cheer) { $('lcdMsg').textContent = m; if (cheer) cheerUntil = performance.now() + 2500; }
 
@@ -82,18 +198,22 @@ function moodLine() {
   if (!p.alive) return `${p.name}(이)가 기운이 다 빠져 소멸했어요… 함께한 날 ${daysBetween(p.born, p.diedOn) + 1}일.`;
   if (p.hp < 25) return '너무 힘이 없어요… 오늘 꼭 움직이고 잘 챙겨 먹어 주세요.';
   if (p.hp < 50) return `조금 시들시들해요. 운동 ${RULES.exGoal}분이면 기운이 나요.`;
-  const ex = exMinutes(L);
-  if (ex >= RULES.exGoal && L.meals.length >= 2) return '오늘 완벽해요! 몸이 가벼워요.';
+  const ex = exMinutes(L), meals = L ? L.meals.length : 0;
+  if (ex >= RULES.exGoalPlus && dayGroups(L).size === GROUP_KEYS.length) return '오늘 최고예요! 60분 운동에 무지개 식단까지!';
+  if (ex >= RULES.exGoal && meals >= 2) return `오늘 잘 하고 있어요! ${ex < RULES.exGoalPlus ? `60분까지 ${RULES.exGoalPlus - ex}분 남았어요.` : ''}`;
   if (ex < RULES.exGoal) return `오늘 운동 ${ex}분. ${RULES.exGoal}분 채우면 체력이 지켜져요.`;
   return '운동 좋았어요! 끼니도 인증해 주세요.';
 }
 function render() {
   const has = !!S;
-  $('setup').hidden = has; $('keys').hidden = !has || !S.pet.alive; $('demo').hidden = !has;
-  if (!has) { $('petName').textContent = '새 알'; $('stageTxt').textContent = 'STAGE 0'; $('dayTxt').textContent = 'DAY 1'; setBars(RULES.startHp, 0); return; }
+  $('keys').hidden = !has || !S.pet.alive; $('demo').hidden = !has;
+  if (!has) {
+    $('setup').hidden = false; setupMode = 'new'; openSetupLabels();
+    $('petName').textContent = '새 알'; $('stageTxt').textContent = '알'; $('dayTxt').textContent = 'DAY 1'; setBars(RULES.startHp, 0); renderLineBox(); return;
+  }
   const p = S.pet;
   $('petName').textContent = p.name;
-  $('stageTxt').textContent = STAGES[stageOf(p.xp)][1];
+  $('stageTxt').textContent = speciesName(p);
   $('dayTxt').textContent = `DAY ${daysBetween(p.born, p.alive ? today() : p.diedOn) + 1}`;
   setBars(p.hp, p.xp);
   if (performance.now() > cheerUntil) $('lcdMsg').textContent = moodLine();
@@ -104,32 +224,54 @@ function render() {
     $('lcdMsg').appendChild(b);
   }
 }
+function openSetupLabels() { $('setupTitle').textContent = '내 튼튼몬 만들기'; $('nameRow').hidden = false; $('bCreate').textContent = '알 받기'; $('bSetupCancel').hidden = true; }
 function setBars(hp, xp) {
-  const st = stageOf(xp); const lo = STAGES[st][0], hi = STAGES[st + 1] ? STAGES[st + 1][0] : lo + 200;
+  const st = stageOf(xp); const lo = STAGES[st][0], hi = STAGES[st + 1] ? STAGES[st + 1][0] : lo + 800;
   $('hpBar').style.width = hp + '%'; $('hpNum').textContent = hp;
   $('xpBar').style.width = clamp((xp - lo) / (hi - lo) * 100, 0, 100) + '%'; $('xpNum').textContent = xp;
 }
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function renderInfo() {
-  const s = S.pet.stats;
-  $('stats').innerHTML = [['심폐', s.cardio], ['근력', s.strength], ['유연', s.flex], ['순발', s.power]]
-    .map(([n, v]) => `<div class="stat"><b>${v}</b><span>${n}</span></div>`).join('');
-  const t = today(); const start = addDay(t, -6); const dn = ['일', '월', '화', '수', '목', '금', '토'];
+  const p = S.pet, t = today(), st = stageOf(p.xp);
+  // 계통 · 진화
+  const L = LINES[p.line];
+  const tr = STAT_KEYS.map(k => `${STAT_NAMES[k]} ${Math.round(p.train[k])}분`).join(' · ');
+  let evo;
+  if (st >= 4) evo = `어른 갈래: <b>${LINES[p.branch || p.line].n} 계통</b>${p.branch && p.branch !== p.line ? ' (운동으로 바뀜)' : ''}`;
+  else {
+    const b = branchFromTraining(p.train, p.line), next = STAGES[st + 1];
+    evo = `다음 단계까지 경험치 ${next[0] - p.xp} · 지금대로라면 어른이 될 때 <b>${SPECIES[4][b]}</b>(${LINES[b].n} 계통)`;
+  }
+  $('evoBox').innerHTML = `<div class="ln"><span class="sw" style="background:rgb(${L.c})"></span>${esc(speciesName(p))} · ${L.n} 계통</div><div>${evo}</div><div class="hint">지금까지 운동: ${tr}</div><div class="hint">연속 기록 ${streak(S, t)}일 (운동·휴식일 + 끼니 인증)</div>`;
+  $('stats').innerHTML = STAT_KEYS.map(k => { const g = p.stats[k] - p.base[k]; return `<div class="stat"><b>${p.stats[k]}</b><span>${STAT_NAMES[k]}</span>${g > 0 ? `<em>+${g}</em>` : ''}</div>`; }).join('');
+  // 오늘
+  const T = S.logs[t], m = exMinutes(T), grp = dayGroups(T);
+  $('todayBox').innerHTML = `<div class="prog"><span>운동 ${m}분 <span class="hint">(기본 ${RULES.exGoal} · 권장 ${RULES.exGoalPlus})</span></span><span class="bar"><i style="width:${clamp(m / RULES.exGoalPlus * 100, 0, 100)}%"></i></span><span class="${m >= RULES.exGoal ? 'ok' : ''}">${m >= RULES.exGoalPlus ? '권장 ✓' : m >= RULES.exGoal ? '기본 ✓' : ''}</span></div>`
+    + `<div class="rainbow">식품군 ${GROUP_KEYS.map(g => `<span class="${grp.has(g) ? 'on' : ''}">${g}</span>`).join('')}</div>`;
+  // 이번 주
+  const w = weekId(t), c = weekCounts(S, w);
+  $('weekBox').innerHTML = weekMissions(c).map(x => `<div class="prog"><span>${x.n}</span><span class="bar"><i style="width:${clamp(x.have / x.need * 100, 0, 100)}%"></i></span><span class="${x.have >= x.need ? 'ok' : ''}">${x.have}/${x.need}일</span></div>`).join('')
+    + `<div class="prog"><span>운동 합계 <span class="hint">(권장 60분×7일)</span></span><span class="bar"><i style="width:${clamp(c.minutes / 420 * 100, 0, 100)}%"></i></span><span>${c.minutes}분</span></div>`
+    + `<div class="hint">무지개 식단 ${c.rainbow}일</div>`;
+  // 7일 점
+  const start = addDay(t, -6), dn = ['일', '월', '화', '수', '목', '금', '토'];
   let h = '';
   for (let i = 0; i < 7; i++) {
-    const k = addDay(start, i); const L = S.logs[k]; const [y, m, d] = k.split('-').map(Number);
-    const wd = dn[new Date(y, m - 1, d).getDay()];
+    const k = addDay(start, i), D = S.logs[k], [y, mo, d] = k.split('-').map(Number);
     let cls = '';
-    if (L && L.status) cls = L.status; else if (exMinutes(L) >= RULES.exGoal) cls = 'ex';
-    h += `<div class="day${k === t ? ' today' : ''}"><span>${wd}</span><span class="dot ${cls}"></span><span class="mealdots">${balancedCount(L)}</span></div>`;
+    if (D && D.status) cls = D.status; else if (cappedMinutes(D) >= RULES.exGoal) cls = 'ex';
+    h += `<div class="day${k === t ? ' today' : ''}"><span>${dn[new Date(y, mo - 1, d).getDay()]}</span><span class="dot ${cls}"></span><span class="mealdots">${balancedCount(D)}</span></div>`;
   }
   $('week').innerHTML = h;
-  const img = p => (p && p.startsWith('data:image/') ? `<img src="${esc(p)}" alt="">` : '');
+  // 기록 목록
+  const img = ph => (ph && ph.startsWith('data:image/') ? `<img src="${esc(ph)}" alt="">` : '');
   const items = [];
   Object.keys(S.logs).sort().reverse().slice(0, 14).forEach(k => {
-    const L = S.logs[k];
-    L.ex.forEach(e => items.push([e.at, `<div class="logi">${img(e.photo)}<span class="tag">${k.slice(5)}</span><span>${esc(e.kind)} ${e.min}분</span></div>`]));
-    L.meals.forEach(m => items.push([m.at, `<div class="logi">${img(m.photo)}<span class="tag">${k.slice(5)}</span><span>${esc(m.slot)} · ${esc(m.checks.join(', ') || '기록만')}</span></div>`]));
+    const D = S.logs[k];
+    D.ex.forEach(e => {
+      const am = e.amount || {}, amt = am.km ? ` ${am.km}km` : am.steps ? ` ${am.steps}걸음` : am.count ? ` ${am.count}번` : am.sets ? ` ${am.sets}×${am.reps}` : '';
+      items.push([e.at, `<div class="logi">${img(e.photo)}<span class="tag">${k.slice(5)}${e.start ? ' ' + e.start : ''}</span><span>${esc(e.kind)} ${e.min}분 · ${INTENSITY[e.int] ? INTENSITY[e.int].n : ''}${esc(amt)}${e.flag ? ' <span class="chk">확인 필요</span>' : ''}</span><span class="xp">${e.xp ? '+' + e.xp : ''}</span></div>`]);
+    });
+    D.meals.forEach(m => items.push([m.at, `<div class="logi">${img(m.photo)}<span class="tag">${k.slice(5)}</span><span>${esc(m.slot)} · ${esc(m.place || '')} · ${esc((m.groups || []).join(', ') || '기록만')}</span><span class="xp">${m.xp ? '+' + m.xp : ''}</span></div>`]));
   });
   $('log').innerHTML = items.length ? items.sort((a, b) => b[0] - a[0]).map(x => x[1]).join('') : '<p class="hint">아직 인증 기록이 없어요.</p>';
 }
@@ -144,32 +286,48 @@ const ctx = $('cv').getContext('2d');
 function frame(t) {
   let pet, preview = false;
   if (S) pet = S.pet;
-  else { const st = statsFromInputs(formInputs()); pet = { type: st.total - 1, xp: 0, hp: RULES.startHp, alive: true, stats: st, height: st.height }; preview = true; }
+  else { const st = statsFromInputs(formInputs()); pet = { line: lineFromStats(st), xp: 0, hp: RULES.startHp, alive: true, height: st.height }; preview = true; }
   draw(ctx, pet, t, { preview, cheer: performance.now() < cheerUntil });
 }
 if (matchMedia('(prefers-reduced-motion: reduce)').matches) setInterval(() => frame(performance.now()), 500);
 else { const loop = t => { frame(t); requestAnimationFrame(loop); }; requestAnimationFrame(loop); }
 
 /* ---------- 연결 ---------- */
-chips($('exKinds'), EX_KINDS.map(k => k[0]), () => sel.ex, v => sel.ex = v);
-chips($('mealSlots'), SLOTS, () => sel.slot, v => sel.slot = v);
-chips($('mealChecks'), CHECKS, () => sel.checks, v => { sel.checks.has(v) ? sel.checks.delete(v) : sel.checks.add(v); }, true);
-$('kEx').onclick = () => openPanel('exPanel'); $('kMeal').onclick = () => openPanel('mealPanel'); $('kInfo').onclick = () => openPanel('infoPanel');
+const val = v => ({ v, label: v });
+chips($('exKinds'), EX_KINDS.map(k => ({ v: k.k, html: `${esc(k.k)}<span class="tagc">${CAT_NAMES[k.cat]}</span>` })), v => sel.ex === v, v => { sel.ex = v; renderExAmount(); renderExCalc(); });
+chips($('exInt'), [1, 2, 3].map(i => ({ v: i, html: `${INTENSITY[i].n}<small>${INTENSITY[i].talk}</small>` })), v => sel.int === v, v => { sel.int = v; renderExCalc(); });
+chips($('exProof'), Object.entries(PROOFS).map(([k, p]) => ({ v: k, html: `${p.n}${p.bonus ? ` <span class="tagc">+${p.bonus * 100}%</span>` : ''}` })), v => sel.proof === v, v => { sel.proof = v; renderExCalc(); });
+chips($('mealSlots'), SLOTS.map(val), v => sel.slot === v, v => { sel.slot = v; renderMealCalc(); });
+chips($('mealPlace'), PLACES.map(val), v => sel.place === v, v => { sel.place = v; if (v === '급식') sel.groups = new Set(SCHOOL_LUNCH); renderMealCalc(); });
+chips($('mealGroups'), GROUPS.map(g => ({ v: g.k, html: `${g.k}<small>${g.ex}</small>` })), v => sel.groups.has(v), v => { sel.groups.has(v) ? sel.groups.delete(v) : sel.groups.add(v); renderMealCalc(); });
+chips($('mealDrink'), DRINKS.map(val), v => sel.drink === v, v => { sel.drink = v; renderMealCalc(); });
+syncChips();
+$('exWarm').onclick = () => { sel.warm = !sel.warm; $('exWarm').setAttribute('aria-pressed', sel.warm); renderExCalc(); };
+$('exStart').addEventListener('input', () => { startTouched = true; renderExCalc(); });
+$('exMin').addEventListener('input', () => { const n = nowMin(); if (!startTouched && n !== null) $('exStart').value = fromMin(Math.max(0, n - (parseInt($('exMin').value) || 0))); renderExCalc(); });
+$('kEx').onclick = openEx; $('kMeal').onclick = openMeal; $('kInfo').onclick = () => openPanel('infoPanel');
 document.querySelectorAll('[data-close]').forEach(b => b.onclick = closePanels);
 $('bEx').onclick = onCertEx; $('bMeal').onclick = onCertMeal;
-$('exPhoto').onchange = e => { const f = e.target.files[0]; if (f) shrinkPhoto(f, d => { photos.ex = d; $('exPrev').src = d; $('exPrev').hidden = false; }); };
-$('mealPhoto').onchange = e => { const f = e.target.files[0]; if (f) shrinkPhoto(f, d => { photos.meal = d; $('mealPrev').src = d; $('mealPrev').hidden = false; }); };
+$('exPhoto').onchange = e => { const f = e.target.files[0]; if (f) shrinkPhoto(f, ph => { photos.ex = ph; $('exPrev').src = ph.data; $('exPrev').hidden = false; renderExCalc(); }); };
+$('mealPhoto').onchange = e => { const f = e.target.files[0]; if (f) shrinkPhoto(f, ph => { photos.meal = ph; $('mealPrev').src = ph.data; $('mealPrev').hidden = false; renderMealCalc(); }); };
+['sCardio', 'sStr', 'sFlex', 'sPow', 'sH', 'sW', 'sM'].forEach(id => $(id).addEventListener('input', renderLineBox));
 $('bCreate').onclick = () => {
+  if (setupMode === 'remeasure' && S) {
+    remeasure(S, formInputs()); save(); $('setup').hidden = true; render(); openPanel('infoPanel');
+    toast('새 PAPS·인바디 기록으로 바꿨어요.'); return;
+  }
   const t = todayKey(pendingOffset);
   S = newState(newPet($('sName').value, statsFromInputs(formInputs()), t), t, pendingOffset);
-  save(); render();
-  say(`${S.pet.name}의 알을 받았어요! 운동이나 식단을 인증하면 깨어나요.`, true);
+  save(); $('setup').hidden = true; render();
+  say(`${S.pet.name}의 ${LINES[S.pet.line].n} 알을 받았어요! 운동이나 식단을 인증하면 깨어나요.`, true);
 };
+$('bSetupCancel').onclick = () => { $('setup').hidden = true; openPanel('infoPanel'); };
+$('bRemeasure').onclick = () => openSetup('remeasure');
 $('bNext').onclick = () => {
   S.offset++; const n = evaluate(S, today()); save(); render();
   const L = S.logs[addDay(today(), -1)];
   if (!S.pet.alive) toast('체력이 0이 되어 소멸했어요.');
-  else if (L && L.status === 'rest') toast('어제는 휴식일로 봐 줬어요.');
+  else if (L && L.status === 'rest') toast(`어제는 휴식일로 봐 줬어요.${n.length ? ' · ' + n.join(', ') : ''}`);
   else toast(n.length ? `하루 지남 · ${n.join(', ')}` : '하루 지남 · 잘 지켰어요!');
 };
 $('bReset').onclick = () => { $('demo').hidden = true; $('resetConfirm').hidden = false; };
@@ -177,5 +335,6 @@ $('bResetNo').onclick = () => { $('resetConfirm').hidden = true; $('demo').hidde
 $('bResetYes').onclick = () => { $('resetConfirm').hidden = true; restart(); };
 
 if (S) { const n = evaluate(S, today()); save(); if (n.length) toast(`없던 동안: ${n.join(', ')}`); }
+$('setup').hidden = !!S;
 render();
 setInterval(() => { if (S && S.pet.alive && S.lastEval < today()) { evaluate(S, today()); save(); render(); } }, 60000);

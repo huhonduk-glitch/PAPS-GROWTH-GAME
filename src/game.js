@@ -1,28 +1,107 @@
 // 게임 계산만 모은 파일 (화면·저장과 분리). 숫자를 바꾸면 CLAUDE.md 2장도 같이 고친다.
+// 기준: WHO 신체활동 지침(2020, 5~17세) — 하루 평균 60분 중강도 이상, 주 3일 고강도, 주 3일 근력.
 
-export const SAVE_VERSION = 1;
-export const STAGES = [[0, '알'], [15, '아기'], [60, '꼬마'], [140, '청소년'], [260, '어른'], [420, '챔피언']];
-export const TYPES = [
-  { n: '불꽃', c: [236, 98, 62] }, { n: '바람', c: [38, 166, 154] }, { n: '새싹', c: [96, 170, 64] },
-  { n: '물방울', c: [64, 132, 224] }, { n: '별빛', c: [150, 104, 214] },
+export const SAVE_VERSION = 2;
+
+/* ---------- 단계 · 계통 ---------- */
+export const STAGES = [[0, '알'], [20, '아기'], [120, '꼬마'], [400, '청소년'], [900, '어른'], [1600, '챔피언']];
+export const STAT_KEYS = ['cardio', 'strength', 'flex', 'power'];
+export const STAT_NAMES = { cardio: '심폐', strength: '근력', flex: '유연', power: '순발' };
+
+/** 계통: 처음 PAPS·인바디로 정해지고, 어른이 될 때 그동안 한 운동으로 한 번 더 갈라진다. */
+export const LINES = {
+  wind: { n: '바람', stat: 'cardio', c: [118, 190, 240], a: [255, 255, 255], desc: '오래 뛰어도 지치지 않는 심폐 계통' },
+  rock: { n: '바위', stat: 'strength', c: [246, 160, 92], a: [150, 160, 182], desc: '힘이 센 근력 계통' },
+  flower: { n: '꽃', stat: 'flex', c: [246, 158, 190], a: [255, 236, 120], desc: '몸이 부드러운 유연 계통' },
+  spark: { n: '별', stat: 'power', c: [252, 206, 84], a: [255, 120, 90], desc: '번개처럼 빠른 순발 계통' },
+  light: { n: '빛', stat: null, c: [252, 240, 214], a: [255, 212, 71], desc: '모든 체력이 고른 균형 계통' },
+};
+const STAT_LINE = { cardio: 'wind', strength: 'rock', flex: 'flower', power: 'spark' };
+export const SPECIES = {
+  1: '뽀송몬', 2: '깃털몬', 3: '날개몬',
+  4: { wind: '하늘몬', rock: '방패몬', flower: '꽃잎몬', spark: '별똥몬', light: '천사몬' },
+  5: { wind: '폭풍날개몬', rock: '황금방패몬', flower: '꽃왕관몬', spark: '유성몬', light: '대천사몬' },
+};
+
+/* ---------- 운동 ---------- */
+// cat: 어느 능력치가 오르는지 (sport = 심폐·순발 반씩)
+// m: 함께 적을 수 있는 기록 — km 거리 · steps 걸음 수 · count 횟수 · reps 세트×횟수 · none 없음
+export const EX_KINDS = [
+  { k: '걷기', cat: 'cardio', m: 'steps' },
+  { k: '달리기', cat: 'cardio', m: 'km' },
+  { k: '자전거', cat: 'cardio', m: 'km' },
+  { k: '수영', cat: 'cardio', m: 'none' },
+  { k: '춤', cat: 'cardio', m: 'none' },
+  { k: '맨몸 근력', cat: 'strength', m: 'reps', hint: '푸시업·스쿼트·런지·윗몸일으키기' },
+  { k: '헬스 기구', cat: 'strength', m: 'reps' },
+  { k: '플랭크', cat: 'strength', m: 'none' },
+  { k: '스트레칭', cat: 'flex', m: 'none' },
+  { k: '요가·필라테스', cat: 'flex', m: 'none' },
+  { k: '줄넘기', cat: 'power', m: 'count' },
+  { k: '단거리·점프', cat: 'power', m: 'none' },
+  { k: '구기 종목', cat: 'sport', m: 'none', hint: '축구·농구·배구·배드민턴·탁구' },
+  { k: '기타', cat: 'cardio', m: 'none' },
 ];
-export const EX_KINDS = [['걷기', 'cardio'], ['달리기', 'cardio'], ['줄넘기', 'power'], ['근력 운동', 'strength'],
-  ['구기 종목', 'power'], ['요가·스트레칭', 'flex'], ['춤', 'cardio'], ['기타', 'cardio']];
+export const CAT_NAMES = { cardio: '심폐', strength: '근력', flex: '유연', power: '순발', sport: '스포츠' };
+/** 강도 = 말하기 테스트 */
+export const INTENSITY = [
+  null,
+  { n: '가볍게', talk: '노래를 부를 수 있어요' },
+  { n: '적당히', talk: '말은 되지만 노래는 힘들어요' },
+  { n: '힘들게', talk: '몇 마디 말하기도 힘들어요' },
+];
+/** 인증 방법 — 증거가 많을수록 경험치를 더 줌 */
+export const PROOFS = {
+  self: { n: '내 기록만', bonus: 0 },
+  photo: { n: '운동 사진', bonus: 0.2, needPhoto: true },
+  device: { n: '앱·워치 기록 화면', bonus: 0.3, needPhoto: true },
+};
+/** 이 속도를 넘으면 "확인 필요" (기록은 받지만 보너스 없음) */
+export const LIMITS = { runKmh: 20, bikeKmh: 35, stepsPerMin: 180, countPerMin: 220, repsPerMin: 40 };
+
+/* ---------- 식단 ---------- */
 export const SLOTS = ['아침', '점심', '저녁', '간식'];
-export const CHECKS = ['채소·과일', '단백질', '밥·빵·면', '우유·유제품', '물 충분히'];
+export const PLACES = ['집밥', '급식', '외식', '편의점·배달', '기타'];
+/** 식품군 5가지 (식품구성자전거의 다섯 바퀴살) */
+export const GROUPS = [
+  { k: '곡류', ex: '밥·빵·면·떡·감자' },
+  { k: '단백질', ex: '고기·생선·달걀·콩·두부' },
+  { k: '채소', ex: '나물·김치·샐러드·버섯·해조류' },
+  { k: '과일', ex: '사과·귤·바나나 등 생과일' },
+  { k: '우유', ex: '우유·요구르트·치즈' },
+];
+export const GROUP_KEYS = GROUPS.map(g => g.k);
+export const DRINKS = ['물', '우유', '주스·탄산', '안 마심'];
+/** 급식은 보통 이렇게 나옴 → 고르기 시작값 */
+export const SCHOOL_LUNCH = ['곡류', '단백질', '채소'];
 
 export const RULES = {
-  exDailyCap: 90,      // 하루 운동 인정 한도(분)
+  exDailyCap: 90,      // 하루 운동 인정 한도(분) — 건강 원칙
   exMinCert: 5,        // 인증 최소 시간(분)
   exMaxInput: 300,
   exGoal: 20,          // 이만큼 안 하면 하루 정산 때 체력 감소
+  exGoalPlus: 60,      // WHO 권장 — 채우면 보너스
+  goalPlusXp: 5,
+  varietyXp: 3,        // 하루에 두 갈래 이상(각 10분 이상)
+  varietyMin: 10,
+  warmXp: 1,           // 준비·정리 운동
+  measureBonus: 0.1,   // 거리·걸음·횟수를 적으면
   missPenalty: 18,
   noMealPenalty: 12,
-  balancedMin: 3,      // 균형식 = 고른 칸 3개 이상
-  balancedBonus: 2,    // 하루 정산 때 균형식 끼니마다
+  balancedMin: 3,      // 균형식 = 식품군 3가지 이상
+  greatMin: 4,         // 아주 좋은 한 끼 = 4가지 이상
+  mealXp: { great: 8, bal: 6, plain: 2 },
+  mealHp: { great: 3, bal: 3, plain: 1 },
+  breakfastXp: 2,      // 아침을 먹으면
+  drinkXp: 1,          // 물·우유
+  photoXp: 1,          // 오늘 찍은 식단 사진
+  rainbowXp: 5,        // 하루에 식품군 5가지 모두
+  balancedBonus: 2,    // 하루 정산 때 균형 잡힌 끼니마다 (간식 빼고)
   balancedBonusMax: 3,
-  mealXp: { bal: 6, plain: 2 },
-  mealHp: { bal: 3, plain: 1 },
+  weekly: { hard: 3, strength: 3, flex: 2, xp: 10, dayMin: 10 }, // 주간 미션
+  branchMin: 120,      // 어른 갈래를 운동으로 정하려면 이만큼(분) 운동
+  branchShare: 0.4,    // 한 갈래가 이 비율 이상이면 그 계통
+  balanceSpread: 16,   // 능력치 가장 높은 것 - 낮은 것 ≤ 이 값이면 빛 계통
   startHp: 70,
   statMax: 150,
 };
@@ -36,96 +115,304 @@ export const addDay = (k, n) => { const x = parse(k); x.setDate(x.getDate() + n)
 export const daysBetween = (a, b) => Math.round((parse(b) - parse(a)) / 864e5);
 /** 날짜가 든 주의 월요일 */
 export function weekId(k) { const x = parse(k); x.setDate(x.getDate() - (x.getDay() + 6) % 7); return keyOf(x); }
+export const isSunday = k => parse(k).getDay() === 0;
 /** 실제 오늘 + 체험용으로 넘긴 날 수 */
 export function todayKey(offset = 0, now = new Date()) { const d = new Date(now); d.setDate(d.getDate() + offset); return keyOf(d); }
+/** 'HH:MM' → 자정부터 몇 분 */
+export function toMin(hm) { const m = /^(\d{1,2}):(\d{2})$/.exec(hm || ''); return m ? +m[1] * 60 + +m[2] : null; }
+export const fromMin = n => `${pad(Math.floor(n / 60))}:${pad(n % 60)}`;
 
 export const stageOf = xp => { let i = 0; STAGES.forEach((s, k) => { if (xp >= s[0]) i = k; }); return i; };
-export const isBalanced = meal => meal.checks.length >= RULES.balancedMin;
+export const kindOf = name => EX_KINDS.find(x => x.k === name) || EX_KINDS[EX_KINDS.length - 1];
 export const exMinutes = L => (L ? L.ex.reduce((a, e) => a + e.min, 0) : 0);
+export const cappedMinutes = L => Math.min(RULES.exDailyCap, exMinutes(L));
+export const mealTier = n => (n >= RULES.greatMin ? 'great' : n >= RULES.balancedMin ? 'bal' : 'plain');
+export const isBalanced = meal => (meal.groups || []).length >= RULES.balancedMin;
 export const balancedCount = L => (L ? L.meals.filter(isBalanced).length : 0);
+/** 하루 정산에 쓰는 균형식 끼니 (간식 빼고) */
+const mainBalanced = L => L.meals.filter(m => m.slot !== '간식' && isBalanced(m)).length;
+export const dayGroups = L => new Set(L ? L.meals.flatMap(m => m.groups || []) : []);
+export const emptyDay = () => ({ ex: [], meals: [], bonus: {} });
+export function dayLog(S, k) { const L = S.logs[k] || (S.logs[k] = emptyDay()); L.bonus = L.bonus || {}; return L; }
 
 /* ---------- 캐릭터 만들기 ---------- */
 export const gradeToStat = gr => (6 - gr) * 16 + 10; // 1등급 90 · 5등급 26
 
-/** 폼 값 → 능력치. f = {total,cardio,strength,flex,power: 등급, height, weight?, muscle?} */
+/** 근육 비율(골격근량÷몸무게). 둘 다 있어야 계산. 체형에는 쓰지 않는다 */
+export const muscleRatio = (weight, muscle) => (weight > 0 && muscle > 0 ? muscle / weight : null);
+
+/** 폼 값 → 능력치. f = {cardio,strength,flex,power: PAPS 등급 1~5, height, weight?, muscle?} */
 export function statsFromInputs(f) {
   let str = gradeToStat(f.strength);
-  const w = f.weight, m = f.muscle;
-  if (w > 0 && m > 0) { const r = m / w; str = Math.round((str + clamp((r - 0.30) / 0.18, 0, 1) * 80 + 10) / 2); }
+  const r = muscleRatio(f.weight, f.muscle);
+  if (r !== null) str = Math.round((str + clamp((r - 0.30) / 0.18, 0, 1) * 80 + 10) / 2);
   return {
-    total: f.total, cardio: gradeToStat(f.cardio), strength: str,
-    flex: gradeToStat(f.flex), power: gradeToStat(f.power), height: f.height > 0 ? f.height : 165,
+    cardio: gradeToStat(f.cardio), strength: str, flex: gradeToStat(f.flex), power: gradeToStat(f.power),
+    height: f.height > 0 ? f.height : 165, muscleRatio: r,
   };
 }
 
+/** 가장 높은 능력치로 계통. 고르면(차이 ≤ 16, 또는 1등이 둘 이상) 빛 계통 */
+export function lineFromStats(st) {
+  const v = STAT_KEYS.map(k => st[k]);
+  const max = Math.max(...v), min = Math.min(...v);
+  if (max - min <= RULES.balanceSpread) return 'light';
+  const tops = STAT_KEYS.filter(k => st[k] === max);
+  return tops.length > 1 ? 'light' : STAT_LINE[tops[0]];
+}
+
+/** 어른이 될 때 갈래: 운동한 분이 충분하고 한 갈래가 40% 이상이면 그 계통, 고르게 했으면 빛, 적으면 처음 계통 */
+export function branchFromTraining(train, line) {
+  const total = STAT_KEYS.reduce((a, k) => a + (train[k] || 0), 0);
+  if (total < RULES.branchMin) return line;
+  const top = STAT_KEYS.reduce((a, k) => ((train[k] || 0) > (train[a] || 0) ? k : a), STAT_KEYS[0]);
+  return train[top] / total >= RULES.branchShare ? STAT_LINE[top] : 'light';
+}
+export const formLine = pet => pet.branch || pet.line;
+export function speciesName(pet) {
+  const st = stageOf(pet.xp);
+  if (st === 0) return `${LINES[pet.line].n} 알`;
+  const s = SPECIES[st];
+  return typeof s === 'string' ? s : s[formLine(pet)];
+}
+
+const pickStats = st => ({ cardio: st.cardio, strength: st.strength, flex: st.flex, power: st.power });
 export function newPet(name, st, today) {
   return {
-    name: (name || '튼튼이').trim().slice(0, 8) || '튼튼이', type: st.total - 1, height: st.height,
-    stats: { cardio: st.cardio, strength: st.strength, flex: st.flex, power: st.power },
+    name: (name || '').trim().slice(0, 8) || '튼튼이', line: lineFromStats(st), branch: null, height: st.height,
+    stats: pickStats(st), base: pickStats(st), train: { cardio: 0, strength: 0, flex: 0, power: 0 },
     hp: RULES.startHp, xp: 0, alive: true, born: today,
   };
 }
-
 export function newState(pet, today, offset = 0) {
-  return { v: SAVE_VERSION, offset, logs: {}, rest: {}, lastEval: today, pet };
+  return { v: SAVE_VERSION, offset, logs: {}, rest: {}, weeks: {}, lastEval: today, pet };
 }
 
-export function dayLog(S, k) { return S.logs[k] || (S.logs[k] = { ex: [], meals: [] }); }
+/** PAPS·인바디를 다시 쟀을 때: 새 기준값 + 그동안 운동으로 오른 만큼. 계통은 그대로 */
+export function remeasure(S, f) {
+  const st = statsFromInputs(f), p = S.pet;
+  STAT_KEYS.forEach(k => { p.stats[k] = clamp(st[k] + (p.stats[k] - p.base[k]), 0, RULES.statMax); p.base[k] = st[k]; });
+  p.height = st.height;
+  return { line: lineFromStats(st) };
+}
+
+/** 경험치 더하기. 어른이 되는 순간 갈래를 정한다. 단계가 오르면 true */
+function addXp(S, n) {
+  const st0 = stageOf(S.pet.xp);
+  S.pet.xp += n;
+  const st1 = stageOf(S.pet.xp);
+  if (st1 >= 4 && !S.pet.branch) S.pet.branch = branchFromTraining(S.pet.train, S.pet.line);
+  return st1 > st0;
+}
 
 /* ---------- 하루 정산 ---------- */
-/** lastEval 부터 어제까지 하루씩 정산. S 를 고치고, 체력이 깎인 날 메모를 돌려준다. */
+/** 한 주(월~일) 미션 세기 */
+export function weekCounts(S, monday) {
+  let hard = 0, strength = 0, flex = 0, minutes = 0, rainbow = 0;
+  for (let i = 0; i < 7; i++) {
+    const L = S.logs[addDay(monday, i)];
+    if (!L) continue;
+    const by = c => L.ex.filter(e => e.cat === c).reduce((a, e) => a + e.min, 0);
+    if (L.ex.some(e => e.int === 3 && e.min >= RULES.weekly.dayMin)) hard++;
+    if (by('strength') >= RULES.weekly.dayMin) strength++;
+    if (by('flex') >= RULES.weekly.dayMin) flex++;
+    minutes += cappedMinutes(L);
+    if (dayGroups(L).size === GROUP_KEYS.length) rainbow++;
+  }
+  return { hard, strength, flex, minutes, rainbow };
+}
+export function weekMissions(c) {
+  const W = RULES.weekly;
+  return [
+    { k: 'hard', n: '힘들게 운동한 날', have: c.hard, need: W.hard },
+    { k: 'strength', n: '근력 운동한 날', have: c.strength, need: W.strength },
+    { k: 'flex', n: '유연성 운동한 날', have: c.flex, need: W.flex },
+  ];
+}
+
+/** lastEval 부터 어제까지 하루씩 정산. S 를 고치고, 메모를 돌려준다. */
 export function evaluate(S, today) {
   if (!S || !S.pet.alive) return [];
+  S.weeks = S.weeks || {};
   const notes = [];
   while (S.lastEval < today && S.pet.alive) {
     const d = S.lastEval;
-    const L = S.logs[d] || { ex: [], meals: [] };
-    const exMin = Math.min(RULES.exDailyCap, exMinutes(L));
+    const L = S.logs[d] || emptyDay();
     let delta = 0;
-    if (exMin >= RULES.exGoal) L.status = 'ex';
+    if (cappedMinutes(L) >= RULES.exGoal) L.status = 'ex';
     else {
       const w = weekId(d);
       if (!S.rest[w]) { S.rest[w] = d; L.status = 'rest'; } else { L.status = 'miss'; delta -= RULES.missPenalty; }
     }
     if (L.meals.length === 0) delta -= RULES.noMealPenalty;
-    else delta += Math.min(balancedCount(L), RULES.balancedBonusMax) * RULES.balancedBonus;
+    else delta += Math.min(mainBalanced(L), RULES.balancedBonusMax) * RULES.balancedBonus;
     S.logs[d] = L;
     S.pet.hp = clamp(S.pet.hp + delta, 0, 100);
     if (delta < 0) notes.push(`${d.slice(5)} 체력 ${delta}`);
     if (S.pet.hp <= 0) { S.pet.alive = false; S.pet.diedOn = d; }
+    if (S.pet.alive && isSunday(d)) {
+      const w = weekId(d), c = weekCounts(S, w);
+      const done = weekMissions(c).filter(m => m.have >= m.need).map(m => m.k);
+      const xp = done.length * RULES.weekly.xp;
+      S.weeks[w] = { ...c, done, xp };
+      if (xp) { addXp(S, xp); notes.push(`주간 미션 ${done.length}개 +${xp}`); }
+    }
     S.lastEval = addDay(d, 1);
   }
   return notes;
 }
 
-/* ---------- 인증 ---------- */
-/** 운동 인증. 결과 {ok, reason?, counted, gain, grew} */
-export function certExercise(S, today, { kind, min, int, photo = null, at = Date.now() }) {
-  min = clamp(Math.trunc(min) || 0, 0, RULES.exMaxInput);
+/* ---------- 운동 인증 ---------- */
+/** 기록한 숫자가 그 시간에 가능한지. 이상하면 이유 글자, 괜찮으면 null */
+export function checkPlausible(kind, min, amount = {}) {
+  const k = kindOf(kind);
+  if (k.m === 'km' && amount.km > 0) {
+    const kmh = amount.km / (min / 60), lim = k.k === '자전거' ? LIMITS.bikeKmh : LIMITS.runKmh;
+    if (kmh > lim) return `시속 ${kmh.toFixed(1)}km — ${k.k}로는 너무 빨라요`;
+  }
+  if (k.m === 'steps' && amount.steps > 0 && amount.steps / min > LIMITS.stepsPerMin) return `1분에 ${Math.round(amount.steps / min)}걸음은 너무 많아요`;
+  if (k.m === 'count' && amount.count > 0 && amount.count / min > LIMITS.countPerMin) return `1분에 ${Math.round(amount.count / min)}번은 너무 많아요`;
+  if (k.m === 'reps' && amount.sets > 0 && amount.reps > 0 && amount.sets * amount.reps / min > LIMITS.repsPerMin) return `1분에 ${Math.round(amount.sets * amount.reps / min)}회는 너무 많아요`;
+  return null;
+}
+const hasAmount = (k, a = {}) => (k.m === 'km' && a.km > 0) || (k.m === 'steps' && a.steps > 0) || (k.m === 'count' && a.count > 0) || (k.m === 'reps' && a.sets > 0 && a.reps > 0);
+
+/**
+ * 운동 인증.
+ * e = {kind, min, int(1~3), start:'HH:MM', amount:{km|steps|count|sets,reps}, warm, proof:'self'|'photo'|'device', photo, photoOk}
+ * nowMin = 지금 시각(자정부터 분). 주면 끝나는 시각이 지금보다 늦은 기록을 막는다.
+ * 결과 {ok, reason?, counted, gain, parts[], flag, grew}
+ */
+export function certExercise(S, today, e, nowMin = null) {
+  const min = clamp(Math.trunc(e.min) || 0, 0, RULES.exMaxInput);
   if (min < RULES.exMinCert) return { ok: false, reason: 'short' };
-  const k = EX_KINDS.find(x => x[0] === kind) || EX_KINDS[EX_KINDS.length - 1];
+  const int = clamp(Math.trunc(e.int) || 2, 1, 3);
+  const proof = PROOFS[e.proof] ? e.proof : 'self';
+  if (PROOFS[proof].needPhoto && !e.photo) return { ok: false, reason: 'photo' };
+  const start = toMin(e.start);
   const L = dayLog(S, today);
-  const before = Math.min(RULES.exDailyCap, exMinutes(L));
+  if (start !== null) {
+    if (start + min > 24 * 60) return { ok: false, reason: 'late' };
+    if (nowMin !== null && start + min > nowMin + 5) return { ok: false, reason: 'future' };
+    const clash = L.ex.some(x => { const s = toMin(x.start); return s !== null && start < s + x.min && s < start + min; });
+    if (clash) return { ok: false, reason: 'overlap' };
+  }
+  const k = kindOf(e.kind);
+  const amount = e.amount || {};
+  const flag = checkPlausible(k.k, min, amount);
+  const before = cappedMinutes(L);
   const counted = Math.min(RULES.exDailyCap, before + min) - before;
-  L.ex.push({ kind: k[0], min, int, photo, at });
-  const gain = Math.round(counted / 10 * (2 + int));
-  const st0 = stageOf(S.pet.xp);
-  S.pet.xp += gain;
-  S.pet.hp = clamp(S.pet.hp + Math.round(counted / 6), 0, 100);
-  S.pet.stats[k[1]] = clamp(S.pet.stats[k[1]] + Math.round(counted / 10), 0, RULES.statMax);
-  return { ok: true, min, counted, gain, grew: stageOf(S.pet.xp) > st0 };
+
+  const parts = [];
+  const base = counted / 10 * (2 + int);
+  let mult = 1;
+  if (!flag) {
+    if (hasAmount(k, amount)) { mult += RULES.measureBonus; parts.push('기록'); }
+    if (PROOFS[proof].bonus && e.photoOk) { mult += PROOFS[proof].bonus; parts.push(PROOFS[proof].n); }
+  }
+  let gain = Math.round(base * mult);
+  if (e.warm && counted > 0 && !flag) { gain += RULES.warmXp; parts.push('준비·정리 운동'); }
+
+  L.ex.push({
+    kind: k.k, cat: k.cat, min, int, start: start === null ? null : fromMin(start), amount, warm: !!e.warm,
+    proof, photo: e.photo || null, photoOk: !!e.photoOk, flag, xp: 0, at: e.at || Date.now(),
+  });
+  const entry = L.ex[L.ex.length - 1];
+
+  // 하루 한 번 보너스
+  if (!L.bonus.goalPlus && cappedMinutes(L) >= RULES.exGoalPlus) { L.bonus.goalPlus = true; gain += RULES.goalPlusXp; parts.push(`하루 ${RULES.exGoalPlus}분`); }
+  const cats = new Set(Object.entries(L.ex.reduce((a, x) => ((a[x.cat] = (a[x.cat] || 0) + x.min), a), {}))
+    .filter(([, m]) => m >= RULES.varietyMin).map(([c]) => c));
+  if (!L.bonus.variety && cats.size >= 2) { L.bonus.variety = true; gain += RULES.varietyXp; parts.push('여러 갈래 운동'); }
+
+  entry.xp = gain;
+  const p = S.pet;
+  p.hp = clamp(p.hp + Math.round(counted / 6), 0, 100);
+  p.train = p.train || { cardio: 0, strength: 0, flex: 0, power: 0 };
+  const split = k.cat === 'sport' ? [['cardio', 0.5], ['power', 0.5]] : [[k.cat, 1]];
+  split.forEach(([s, w]) => {
+    p.stats[s] = clamp(p.stats[s] + Math.round(counted / 10 * w), 0, RULES.statMax);
+    p.train[s] += counted * w;
+  });
+  const grew = addXp(S, gain);
+  return { ok: true, min, counted, gain, parts, flag, grew };
 }
 
-/** 식단 인증. 끼니마다 하루 1번. 결과 {ok, reason?, balanced, gain, grew} */
-export function certMeal(S, today, { slot, checks, photo = null, at = Date.now() }) {
+/* ---------- 식단 인증 ---------- */
+/**
+ * 식단 인증. 끼니마다 하루 1번.
+ * m = {slot, place, groups[], drink, photo, photoOk}
+ * 결과 {ok, reason?, n, tier, gain, parts[], rainbow, grew}
+ */
+export function certMeal(S, today, m) {
   const L = dayLog(S, today);
-  if (L.meals.some(m => m.slot === slot)) return { ok: false, reason: 'dup' };
-  const meal = { slot, checks: [...checks], photo, at };
-  const bal = isBalanced(meal);
-  L.meals.push(meal);
-  const gain = bal ? RULES.mealXp.bal : RULES.mealXp.plain;
-  const st0 = stageOf(S.pet.xp);
-  S.pet.xp += gain;
-  S.pet.hp = clamp(S.pet.hp + (bal ? RULES.mealHp.bal : RULES.mealHp.plain), 0, 100);
-  return { ok: true, balanced: bal, gain, grew: stageOf(S.pet.xp) > st0 };
+  if (!SLOTS.includes(m.slot)) return { ok: false, reason: 'slot' };
+  if (L.meals.some(x => x.slot === m.slot)) return { ok: false, reason: 'dup' };
+  const groups = new Set([...(m.groups || [])].filter(g => GROUP_KEYS.includes(g)));
+  if (m.drink === '우유') groups.add('우유');
+  const list = GROUP_KEYS.filter(g => groups.has(g));
+  const tier = mealTier(list.length);
+  const parts = [];
+  let gain = RULES.mealXp[tier];
+  if (m.slot === '아침') { gain += RULES.breakfastXp; parts.push('아침 챙김'); }
+  if (m.drink === '물' || m.drink === '우유') { gain += RULES.drinkXp; parts.push(`${m.drink} 마심`); }
+  if (m.photo && m.photoOk) { gain += RULES.photoXp; parts.push('사진'); }
+  const had = dayGroups(L).size;
+  L.meals.push({
+    slot: m.slot, place: PLACES.includes(m.place) ? m.place : '기타', groups: list,
+    drink: DRINKS.includes(m.drink) ? m.drink : '안 마심', photo: m.photo || null, photoOk: !!m.photoOk, xp: 0, at: m.at || Date.now(),
+  });
+  let rainbow = false;
+  if (!L.bonus.rainbow && had < GROUP_KEYS.length && dayGroups(L).size === GROUP_KEYS.length) {
+    L.bonus.rainbow = true; rainbow = true; gain += RULES.rainbowXp; parts.push('무지개 식단');
+  }
+  L.meals[L.meals.length - 1].xp = gain;
+  S.pet.hp = clamp(S.pet.hp + RULES.mealHp[tier], 0, 100);
+  const grew = addXp(S, gain);
+  return { ok: true, n: list.length, tier, gain, parts, rainbow, grew };
+}
+
+/** 연속 기록: 어제부터 거꾸로, 운동(또는 휴식일)과 끼니 인증이 둘 다 있는 날 수 (+ 오늘 이미 채웠으면 1) */
+export function streak(S, today) {
+  const good = L => L && L.meals.length > 0 && (L.status === 'ex' || L.status === 'rest');
+  let n = 0;
+  for (let d = addDay(today, -1); good(S.logs[d]); d = addDay(d, -1)) n++;
+  const T = S.logs[today];
+  if (T && T.meals.length > 0 && cappedMinutes(T) >= RULES.exGoal) n++;
+  return n;
+}
+
+/* ---------- 예전 저장(v1) 옮기기 ---------- */
+const V1_STAGES = [0, 15, 60, 140, 260, 420];
+/** 예전 경험치 → 새 경험치 (같은 단계, 같은 비율 위치) */
+export function migrateXp(xp) {
+  const T = STAGES.map(s => s[0]);
+  let i = 0; V1_STAGES.forEach((t, k) => { if (xp >= t) i = k; });
+  if (i === V1_STAGES.length - 1) return T[i] + (xp - V1_STAGES[i]) * ((T[i] - T[i - 1]) / (V1_STAGES[i] - V1_STAGES[i - 1]));
+  return Math.round(T[i] + (xp - V1_STAGES[i]) / (V1_STAGES[i + 1] - V1_STAGES[i]) * (T[i + 1] - T[i]));
+}
+const V1_KIND = { '근력 운동': '맨몸 근력', '요가·스트레칭': '스트레칭' };
+const V1_GROUP = { '채소·과일': '채소', '단백질': '단백질', '밥·빵·면': '곡류', '우유·유제품': '우유' };
+export function migrate(v) {
+  if (!v || !v.pet) return null;
+  if (v.v === SAVE_VERSION) return v;
+  if (v.v !== 1) return null;
+  const p = v.pet;
+  const stats = { ...p.stats };
+  const pet = {
+    name: p.name, line: lineFromStats(stats), branch: null, height: p.height, stats, base: { ...stats },
+    train: { cardio: 0, strength: 0, flex: 0, power: 0 }, hp: p.hp, xp: Math.round(migrateXp(p.xp)), alive: p.alive, born: p.born,
+  };
+  if (p.diedOn) pet.diedOn = p.diedOn;
+  const logs = {};
+  Object.entries(v.logs || {}).forEach(([d, L]) => {
+    logs[d] = {
+      status: L.status, bonus: {},
+      ex: (L.ex || []).map(e => { const k = kindOf(V1_KIND[e.kind] || e.kind); return { kind: k.k, cat: k.cat, min: e.min, int: e.int, start: null, amount: {}, warm: false, proof: e.photo ? 'photo' : 'self', photo: e.photo || null, photoOk: false, flag: null, xp: 0, at: e.at }; }),
+      meals: (L.meals || []).map(m => ({ slot: m.slot, place: '기타', groups: GROUP_KEYS.filter(g => (m.checks || []).some(c => V1_GROUP[c] === g)), drink: (m.checks || []).includes('물 충분히') ? '물' : '안 마심', photo: m.photo || null, photoOk: false, xp: 0, at: m.at })),
+    };
+    if (!logs[d].status) delete logs[d].status;
+  });
+  if (stageOf(pet.xp) >= 4) pet.branch = pet.line;
+  return { v: SAVE_VERSION, offset: v.offset || 0, logs, rest: v.rest || {}, weeks: {}, lastEval: v.lastEval, pet };
 }

@@ -23,7 +23,7 @@
     <div class="brand">DEOK TT · PE</div>
     <div class="bezel"><div class="lcd">
       <div class="lcd-top"><b id="petName">새 알</b><span id="stageTxt">STAGE 0</span><span id="dayTxt">DAY 1</span></div>
-      <canvas id="cv" width="64" height="44" aria-hidden="true"></canvas>
+      <canvas id="cv" width="72" height="54" aria-hidden="true"></canvas>
       <div class="meter"><span>HP</span><div class="bar"><i id="hpBar" style="width:70%"></i></div><span id="hpNum">70</span></div>
       <div class="meter"><span>XP</span><div class="bar"><i id="xpBar" style="width:0%"></i></div><span id="xpNum">0</span></div>
       <div class="lcd-msg" id="lcdMsg">PAPS 등급을 넣으면 나만의 알이 생겨요.</div>
@@ -35,13 +35,12 @@
     </div>
   </div>
 
-  <!-- 처음 만들기 -->
+  <!-- 처음 만들기 (다시 재기에도 씀) -->
   <section class="card" id="setup">
-    <h2>내 튼튼몬 만들기</h2>
-    <p class="hint">PAPS 등급과 몸 정보로 첫 능력치가 정해져요. 바꾸면 화면 속 알이 바로 바뀌어요.</p>
-    <label>이름<input id="sName" value="튼튼이" maxlength="8"></label>
+    <h2 id="setupTitle">내 튼튼몬 만들기</h2>
+    <p class="hint">PAPS 종목 등급과 인바디로 튼튼몬의 <b>계통</b>이 정해져요. 가장 강한 체력이 계통이 되고, 고르면 빛 계통이에요.</p>
+    <label id="nameRow">이름 (별명)<input id="sName" value="튼튼이" maxlength="8" autocomplete="off"></label>
     <div class="row">
-      <label>PAPS 종합 등급<select id="sTotal"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
       <label>심폐지구력 등급<select id="sCardio"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
       <label>근력·근지구력 등급<select id="sStr"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option></select></label>
       <label>유연성 등급<select id="sFlex"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option></select></label>
@@ -50,50 +49,79 @@
       <label>몸무게 (kg, 선택)<input id="sW" type="number" inputmode="decimal" placeholder="예: 55"></label>
       <label>골격근량 (kg, 인바디·선택)<input id="sM" type="number" inputmode="decimal" placeholder="예: 21"></label>
     </div>
-    <p class="note">몸무게는 캐릭터 모양에 쓰지 않아요. 인바디 골격근량과 함께 근력 능력치에만 반영돼요. 키는 캐릭터 키에 살짝 반영돼요.</p>
-    <button class="btn" id="bCreate">알 받기</button>
+    <div class="linebox" id="lineBox" aria-live="polite"></div>
+    <p class="note">몸무게는 캐릭터 모양에 쓰지 않아요. 골격근량과 함께 <b>근육 비율</b>(골격근량÷몸무게)을 구해 근력 능력치에만 반영해요. 체지방·BMI는 받지 않아요.</p>
+    <div class="btns"><button class="btn ghost" id="bSetupCancel" hidden>닫기</button><button class="btn" id="bCreate">알 받기</button></div>
   </section>
 
   <!-- 운동 인증 -->
   <section class="card" id="exPanel" hidden>
-    <h2>오늘 운동 인증</h2>
-    <div class="chips" id="exKinds"></div>
+    <h2>운동 인증</h2>
+    <div class="field"><span class="flabel">어떤 운동?</span><div class="chips" id="exKinds"></div><p class="hint" id="exKindHint"></p></div>
     <div class="row">
+      <label>시작 시각<input id="exStart" type="time"></label>
       <label>시간 (분)<input id="exMin" type="number" inputmode="numeric" value="30" min="5" max="300"></label>
-      <label>강도<select id="exInt"><option value="1">가볍게</option><option value="2" selected>적당히</option><option value="3">힘들게</option></select></label>
     </div>
-    <label>인증 사진 (선택)<input id="exPhoto" type="file" accept="image/*"></label>
+    <div class="field"><span class="flabel">얼마나 힘들었나요? (말하기 테스트)</span><div class="chips col" id="exInt"></div></div>
+    <div class="row" id="exAmount"></div>
+    <div class="chips"><button class="chip" type="button" id="exWarm" aria-pressed="false">준비·정리 운동도 했어요 (+1)</button></div>
+    <div class="field"><span class="flabel">어떻게 인증할까요?</span><div class="chips" id="exProof"></div></div>
+    <label id="exPhotoRow">사진<input id="exPhoto" type="file" accept="image/*"></label>
     <img id="exPrev" class="preview-img" alt="운동 인증 사진 미리보기" hidden>
-    <p class="hint">하루 90분까지만 점수에 들어가요. 그 이상은 쉬는 게 더 좋아요.</p>
+    <p class="calc" id="exCalc"></p>
     <div class="btns"><button class="btn ghost" data-close>닫기</button><button class="btn" id="bEx">인증하기</button></div>
   </section>
 
   <!-- 식단 인증 -->
   <section class="card" id="mealPanel" hidden>
     <h2>식단 인증</h2>
-    <div class="chips" id="mealSlots"></div>
-    <p class="hint">이번 끼니에 들어간 것을 골라 주세요. 3가지 이상이면 균형 잡힌 한 끼예요.</p>
-    <div class="chips" id="mealChecks"></div>
-    <label>인증 사진 (선택)<input id="mealPhoto" type="file" accept="image/*"></label>
+    <div class="field"><span class="flabel">어느 끼니?</span><div class="chips" id="mealSlots"></div></div>
+    <div class="field"><span class="flabel">어디서 먹었나요?</span><div class="chips" id="mealPlace"></div></div>
+    <div class="field"><span class="flabel">들어간 식품군을 모두 골라요</span><div class="chips col" id="mealGroups"></div></div>
+    <div class="field"><span class="flabel">무엇을 마셨나요?</span><div class="chips" id="mealDrink"></div></div>
+    <label>사진 (선택 · 오늘 찍은 사진이면 +1)<input id="mealPhoto" type="file" accept="image/*"></label>
     <img id="mealPrev" class="preview-img" alt="식단 인증 사진 미리보기" hidden>
+    <div class="rainbow" id="mealToday"></div>
+    <p class="calc" id="mealCalc"></p>
     <div class="btns"><button class="btn ghost" data-close>닫기</button><button class="btn" id="bMeal">인증하기</button></div>
   </section>
 
   <!-- 기록 -->
   <section class="card" id="infoPanel" hidden>
-    <h2>능력치와 이번 주</h2>
+    <h2>내 튼튼몬 기록</h2>
+    <div class="linebox" id="evoBox"></div>
     <div class="stats" id="stats"></div>
+    <div class="sub2">오늘</div>
+    <div id="todayBox"></div>
+    <div class="sub2">이번 주 미션 <span class="hint">(WHO 청소년 신체활동 지침 · 일요일 밤에 정산, 하나에 +10)</span></div>
+    <div id="weekBox"></div>
     <div class="week" id="week"></div>
     <p class="hint">초록 = 운동 20분 이상 · 파랑 = 휴식일(주 1회 자동) · 주황 = 운동 안 함 · 숫자 = 균형 잡힌 끼니 수</p>
     <div class="log" id="log"></div>
-    <div class="btns"><button class="btn ghost" data-close>닫기</button></div>
+    <div class="btns"><button class="btn ghost" id="bRemeasure">PAPS·인바디 다시 넣기</button><button class="btn ghost" data-close>닫기</button></div>
   </section>
 
   <!-- 규칙 + 체험용 -->
   <section class="card" id="rules">
     <h2>이렇게 자라요</h2>
-    <p class="hint">알 → 아기 → 꼬마 → 청소년 → 어른 → 챔피언. 운동 20분 이상, 균형 잡힌 끼니를 인증하면 경험치와 체력이 올라요.</p>
-    <p class="hint">하루가 지날 때 운동을 안 했으면 체력이 18 줄고(주 1회는 휴식일로 봐 줘요), 끼니 인증이 하나도 없으면 12 줄어요. 체력이 0이 되면 튼튼몬이 소멸해요.</p>
+    <details class="rule"><summary>단계와 진화</summary>
+      <p class="hint">알(0) → 아기 뽀송몬(20) → 꼬마 깃털몬(120) → 청소년 날개몬(400) → 어른(900) → 챔피언(1600). 괄호는 필요한 경험치예요.</p>
+      <p class="hint"><b>어른이 될 때 한 번 더 갈라져요.</b> 그동안 운동한 시간이 120분 이상이고 한 갈래(심폐·근력·유연·순발)가 40% 이상이면 그 계통, 고르게 했으면 빛 계통(천사몬), 아니면 처음 계통 그대로예요.</p>
+    </details>
+    <details class="rule"><summary>운동 점수</summary>
+      <p class="hint">경험치 = 분 ÷ 10 × (2 + 강도). 강도는 말하기 테스트로 골라요: 가볍게 1 · 적당히 2 · 힘들게 3.</p>
+      <p class="hint">인증 보너스: 거리·걸음·횟수를 적으면 +10%, 오늘 찍은 운동 사진 +20%, 앱·워치 기록 화면 +30%. 준비·정리 운동 +1.</p>
+      <p class="hint">하루에 60분(WHO 권장)을 채우면 +5, 두 갈래 이상 운동(각 10분 이상)하면 +3.</p>
+      <p class="hint">하루 90분까지만 점수에 들어가요. 시간이 겹치거나 아직 안 끝난 운동은 인증할 수 없고, 말이 안 되는 기록(예: 30분에 15km 달리기)은 "확인 필요"로 보너스 없이 받아요.</p>
+    </details>
+    <details class="rule"><summary>식단 점수</summary>
+      <p class="hint">식품군 5가지: 곡류 · 단백질(고기·생선·달걀·콩) · 채소 · 과일 · 우유.</p>
+      <p class="hint">한 끼에 2가지 이하 +2, 3가지 = 균형식 +6, 4가지 이상 = 아주 좋은 한 끼 +8. 아침을 먹으면 +2, 물이나 우유를 마시면 +1, 오늘 찍은 사진 +1.</p>
+      <p class="hint">하루에 5가지를 모두 먹으면 무지개 식단 +5. 적게 먹는다고 점수를 주지는 않아요 — 골고루 먹는 게 점수예요.</p>
+    </details>
+    <details class="rule"><summary>체력과 하루 정산</summary>
+      <p class="hint">운동하면 체력 +분÷6, 균형식이면 +3. 날짜가 바뀔 때 운동 20분이 안 되면 체력 -18 (주 1회는 휴식일로 봐 줘요), 끼니 인증이 하나도 없으면 -12, 균형 잡힌 끼니(간식 빼고)마다 +2. 체력이 0이 되면 튼튼몬이 소멸해요.</p>
+    </details>
     <div class="btns" id="demo" hidden>
       <button class="btn ghost small" id="bNext">체험용: 하루 넘기기</button>
       <button class="btn ghost small" id="bReset">처음부터 다시</button>

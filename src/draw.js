@@ -1,71 +1,264 @@
-// 픽셀 튼튼몬 그림 (64×44 캔버스). 게임 상태는 받기만 하고 고치지 않는다.
-import { TYPES, stageOf, clamp } from './game.js';
+// 픽셀 튼튼몬 그림 (72×54 캔버스). 게임 상태는 받기만 하고 고치지 않는다.
+// 모양: 둥근 몸 + 큰 눈 + 날개 + 후광 (아기 천사 느낌). 계통마다 색과 장식이 다르다.
+// 건강 원칙: 몸무게·체지방으로 체형을 바꾸지 않는다 (키만 ±8%).
+import { LINES, stageOf, clamp, formLine } from './game.js';
 
-const INK = [38, 51, 31], BG = [185, 201, 160];
+export const W = 72, H = 54;
+const GROUND = 50;
+const INK = [44, 40, 60], BG = [185, 201, 160];
+const WHITE = [255, 255, 255], CREAM = [255, 246, 228], PINK = [255, 150, 168], MOUTH = [150, 60, 78];
+const GOLD = [255, 210, 80], GOLD_D = [214, 150, 40], WING_S = [214, 226, 244], WING_O = [128, 148, 190];
 const mix = (a, b, k) => a.map((v, i) => v + (b[i] - v) * k);
 
-/** pet = {type,xp,hp,alive,stats,height} · t = 시각(ms) · preview = 만들기 전 미리보기 · cheer = 기뻐하는 중 */
+/* ---------- 픽셀 도화지: 채운 모양 둘레에 저절로 테두리 ---------- */
+class Layer {
+  constructor() { this.p = new Array(W * H).fill(null); }
+  set(x, y, c) { x = Math.round(x); y = Math.round(y); if (x >= 0 && y >= 0 && x < W && y < H) this.p[y * W + x] = c; }
+  get(x, y) { return x >= 0 && y >= 0 && x < W && y < H ? this.p[y * W + x] : null; }
+  /** 타원 채우기. col 이 함수면 (dx,dy,k) → 색 */
+  ell(cx, cy, rx, ry, col) {
+    for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+      const dx = x - cx, dy = y - cy, k = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
+      if (k <= 1) this.set(x, y, typeof col === 'function' ? col(dx, dy, k) : col);
+    }
+  }
+  outline(c) {
+    const add = [];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (this.get(x, y)) continue;
+      if (this.get(x - 1, y) || this.get(x + 1, y) || this.get(x, y - 1) || this.get(x, y + 1)) add.push([x, y]);
+    }
+    add.forEach(([x, y]) => this.set(x, y, c));
+    return this;
+  }
+  onto(dst) { this.p.forEach((c, i) => { if (c) dst.p[i] = c; }); }
+}
+
+function palette(line, weak) {
+  const L = LINES[line] || LINES.light;
+  const b = mix(L.c, [160, 160, 156], weak * 0.7);
+  return { b, s: mix(b, INK, 0.2), h: mix(b, WHITE, 0.5), o: mix(b, INK, 0.62), a: L.a };
+}
+/** 둥근 몸 칠하기: 왼쪽 위가 밝고 아래가 어둡다 */
+const shade = (pal, rx, ry, soft) => (dx, dy, k) =>
+  dx < -rx * 0.25 && dy < -ry * 0.3 && k < 0.7 ? pal.h : (soft ? k > 0.78 && dy > ry * 0.35 : dy > ry * 0.45 || (k > 0.8 && dy > 0)) ? pal.s : pal.b;
+
+/* ---------- 얼굴 ---------- */
+function face(L, cx, ey, gap, size, mood) {
+  const { hp, cheer, blink } = mood;
+  const ew = size >= 3 ? 3 : 2, eh = size + 1;
+  [-1, 1].forEach(s => {
+    const x0 = s < 0 ? cx - gap - ew + 1 : cx + gap; // 눈 왼쪽 끝
+    const mid = x0 + (ew - 1) / 2;
+    if (cheer) { // 웃는 눈 ^^
+      L.set(x0, ey + 2, INK); L.set(mid, ey + 1, INK); L.set(x0 + ew - 1, ey + 2, INK);
+      if (ew === 3) { L.set(x0 + 0.6, ey + 1, INK); }
+    } else if (blink || hp < 25) { // 감은 눈
+      for (let i = 0; i < ew; i++) L.set(x0 + i, ey + eh - 1, INK);
+    } else if (hp < 50) { // 졸린 눈 (반쯤 감김)
+      for (let j = Math.ceil(eh / 2); j < eh; j++) for (let i = 0; i < ew; i++) L.set(x0 + i, ey + j, INK);
+      for (let i = -1; i <= ew; i++) L.set(x0 + i, ey + Math.ceil(eh / 2) - 1, mix(INK, WHITE, 0.25));
+    } else { // 반짝이는 큰 눈
+      for (let j = 0; j < eh; j++) for (let i = 0; i < ew; i++) L.set(x0 + i, ey + j, j === eh - 1 && ew === 3 && i !== 1 ? mix(INK, [110, 120, 230], 0.45) : INK);
+      L.set(x0, ey, WHITE);
+      if (ew === 3) { L.set(x0 + 1, ey, WHITE); L.set(x0, ey + 1, WHITE); }
+    }
+    if (hp >= 40) { const bx = s < 0 ? x0 - 1 : x0 + ew - 1; L.set(bx, ey + eh, PINK); L.set(bx + 1, ey + eh, PINK); }
+  });
+  const my = ey + eh;
+  if (cheer) { L.set(cx - 1, my, MOUTH); L.set(cx, my, MOUTH); L.set(cx + 1, my, MOUTH); L.set(cx, my + 1, PINK); }
+  else if (hp >= 50) { L.set(cx - 1, my, MOUTH); L.set(cx, my + 1, MOUTH); L.set(cx + 1, my, MOUTH); }
+  else if (hp >= 25) { L.set(cx - 1, my + 1, MOUTH); L.set(cx, my + 1, MOUTH); L.set(cx + 1, my + 1, MOUTH); }
+  else { L.set(cx - 1, my + 1, MOUTH); L.set(cx, my, MOUTH); L.set(cx + 1, my + 1, MOUTH); }
+}
+
+/* ---------- 날개 · 후광 ---------- */
+function wings(L, cx, ay, spread, size, flap, tip) {
+  [-1, 1].forEach(s => {
+    for (let i = 0; i < 3; i++) {
+      const ex = cx + s * (spread + i * size * 0.42), ey = ay - i * size * 0.34 - flap * (i + 1) * 0.6;
+      const rx = size * (0.62 - i * 0.1), ry = size * 0.3;
+      L.ell(ex, ey, rx, ry, (dx, dy) => (dy > ry * 0.2 ? (i === 2 && tip ? tip : WING_S) : WHITE));
+    }
+  });
+}
+function halo(L, cx, y, rx) {
+  for (let x = -rx; x <= rx; x++) {
+    const t = Math.sqrt(Math.max(0, 1 - (x * x) / (rx * rx)));
+    const dy = Math.round(t * rx * 0.28);
+    L.set(cx + x, y - dy, Math.abs(x) > rx * 0.6 ? GOLD_D : GOLD);
+    L.set(cx + x, y + dy, GOLD_D);
+  }
+}
+function crown(L, cx, y) {
+  for (let x = -3; x <= 3; x++) { L.set(cx + x, y, GOLD); L.set(cx + x, y + 1, GOLD_D); }
+  [-3, 0, 3].forEach(x => { L.set(cx + x, y - 1, GOLD); L.set(cx + x, y - 2, x === 0 ? [255, 120, 140] : GOLD); });
+  L.set(cx - 1, y - 1, GOLD); L.set(cx + 1, y - 1, GOLD);
+}
+function flower(L, cx, y, petal) {
+  [[0, -1], [-1, 0], [1, 0], [0, 1]].forEach(([dx, dy]) => L.set(cx + dx, y + dy, petal));
+  L.set(cx, y, [255, 214, 80]);
+}
+function star(L, cx, y, c) {
+  [[0, -2], [0, -1], [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0], [0, 1], [-1, 2], [1, 2]].forEach(([dx, dy]) => L.set(cx + dx, y + dy, c));
+}
+
+/** 계통 장식. big = 어른 이상 */
+function gear(A, line, cx, topY, r, big) {
+  if (line === 'wind') {
+    const c = big ? [150, 214, 255] : WHITE;
+    [[0, 0], [1, -1], [2, -2], [2, -3], [1, -4]].forEach(([dx, dy]) => A.set(cx + dx, topY + dy, c));
+    if (big) [[-1, -1], [-2, -2], [-2, -3]].forEach(([dx, dy]) => A.set(cx + dx, topY + dy, c));
+  } else if (line === 'rock') {
+    if (big) { // 투구 띠
+      for (let x = -r + 2; x <= r - 2; x++) A.set(cx + x, topY + 3, [176, 186, 206]);
+      A.ell(cx, topY - 1, 2, 2, [176, 186, 206]); A.set(cx, topY - 1, WHITE);
+    } else { A.ell(cx, topY - 1, 1.5, 1.5, [168, 174, 190]); }
+  } else if (line === 'flower') {
+    if (big) [-6, -3, 0, 3, 6].forEach((x, i) => flower(A, cx + x, topY + 2 - (i % 2), i % 2 ? [255, 255, 255] : [255, 130, 170]));
+    else { flower(A, cx + 3, topY + 1, [255, 120, 160]); A.set(cx + 1, topY, [110, 190, 100]); }
+  } else if (line === 'spark') {
+    star(A, cx, topY - 2, big ? [255, 238, 120] : [255, 226, 90]);
+  }
+}
+
+/* ---------- 단계별 몸 ---------- */
+function drawEgg(F, pet, t, preview) {
+  const pal = palette(pet.line, 0);
+  const shake = pet.xp >= 12 ? 2 : 1;
+  const wob = Math.sin(t / (preview ? 420 : 240)) * shake;
+  const cx = 36 + Math.round(wob * 0.6), cy = GROUND - 12;
+  const E = new Layer();
+  E.ell(cx, cy, 9, 11.5, (dx, dy, k) => {
+    const band = Math.abs(dy + 1 - (Math.round((dx + 20) / 2) % 2 ? 1 : 0)) < 1.1;
+    if (band) return pet.line === 'light' ? GOLD : pal.b;
+    if ((pet.line === 'wind' || pet.line === 'flower' || pet.line === 'spark') && ((dx + 9) * 7 + (dy + 12) * 5) % 23 === 0) return pal.b;
+    return dx < -3 && dy < -4 && k < 0.6 ? WHITE : dy > 6 || k > 0.82 ? mix(CREAM, pal.s, 0.25) : CREAM;
+  });
+  E.outline(mix(pal.o, INK, 0.2)).onto(F);
+  if (pet.xp >= 12) [[-2, -6], [-1, -5], [0, -6], [1, -5], [2, -6]].forEach(([dx, dy]) => F.set(cx + dx, cy + dy, INK)); // 금
+}
+
+function drawBaby(F, pet, t, mood, pal, s) {
+  const r = 7 * s, bob = Math.sin(t / 300) * 1.6 * (1 - mood.weak * 0.7) + (mood.cheer ? Math.abs(Math.sin(t / 110)) * 3 : 0);
+  const cx = 36, cy = GROUND - r - 5 - bob;
+  const flap = Math.sin(t / (mood.cheer ? 70 : 160)) * (1 - mood.weak * 0.8);
+  const Wg = new Layer();
+  [-1, 1].forEach(si => { // 귀처럼 생긴 작은 날개
+    Wg.ell(cx + si * (r + 1), cy - r * 0.45 - flap, 3.4, 2.2, (dx, dy) => (dy > 0.4 ? WING_S : WHITE));
+    Wg.ell(cx + si * (r + 3.5), cy - r * 0.75 - flap * 1.4, 2.6, 1.7, WHITE);
+  });
+  Wg.outline(WING_O).onto(F);
+  const B = new Layer();
+  B.ell(cx, cy, r + 0.5, r - 0.3, shade(pal, r, r));
+  B.outline(pal.o).onto(F);
+  face(F, cx, Math.round(cy - 1), 2, 2, mood);
+  shadow(F, cx, r);
+}
+
+function drawKid(F, pet, t, mood, pal, s) {
+  const r = 9 * s, bounce = Math.abs(Math.sin(t / (220 + mood.weak * 400))) * (mood.cheer ? 4 : 1.5) * (1 - mood.weak * 0.8);
+  const cx = 36, cy = GROUND - r - 2 - bounce;
+  const flap = Math.sin(t / (mood.cheer ? 80 : 200)) * (1 - mood.weak * 0.8);
+  const Wg = new Layer();
+  wings(Wg, cx, cy - 1, r - 1, 6, flap, null);
+  Wg.outline(WING_O).onto(F);
+  const B = new Layer();
+  [-1, 1].forEach(si => B.ell(cx + si * r * 0.45, GROUND - 1 - bounce * 0.3, 2.4, 1.6, pal.s)); // 발
+  B.ell(cx, cy, r + 0.5, r - 0.5, shade(pal, r, r));
+  B.ell(cx, cy + r * 0.4, r * 0.55, r * 0.38, CREAM); // 배
+  B.outline(pal.o).onto(F);
+  const A = new Layer(); gear(A, pet.line, cx, Math.round(cy - r), r, false); A.outline(pal.o).onto(F);
+  face(F, cx, Math.round(cy - 1), 3, 2, mood);
+  const H0 = new Layer(); halo(H0, cx, Math.round(cy - r - 4 + Math.sin(t / 400)), 4); H0.onto(F);
+  shadow(F, cx, r);
+}
+
+function drawChibi(F, pet, t, mood, pal, s, st) {
+  const line = st >= 4 ? formLine(pet) : pet.line;
+  const big = st >= 4;
+  const hr = (st === 3 ? 9 : 10) * s, br = (st === 3 ? 5 : 6) * s;
+  const bounce = Math.abs(Math.sin(t / (240 + mood.weak * 400))) * (mood.cheer ? 4 : 1.2) * (1 - mood.weak * 0.8);
+  const cx = 36, feetY = GROUND - 1 - bounce * 0.3;
+  const by = GROUND - br - 2 - bounce, hy = by - br - hr * 0.8;
+  const flap = Math.sin(t / (mood.cheer ? 80 : 220)) * (1 - mood.weak * 0.8);
+  // 날개
+  const Wg = new Layer();
+  const tip = line === 'wind' ? [150, 210, 255] : line === 'light' || st === 5 ? [255, 230, 150] : null;
+  if (st === 5) wings(Wg, cx, by + 1, br + 1, 6.5, flap * 0.7, tip);
+  wings(Wg, cx, by - br + 1, br + 2, st === 3 ? 7 : 9, flap, tip);
+  Wg.outline(st === 5 ? GOLD_D : WING_O).onto(F);
+  // 몸(천사 옷) · 팔 · 발
+  const B = new Layer();
+  [-1, 1].forEach(si => B.ell(cx + si * br * 0.55, feetY, 2.2, 1.5, pal.s));
+  const armUp = mood.cheer || pet.hp > 85;
+  [-1, 1].forEach(si => B.ell(cx + si * (br + 1), by + (armUp ? -br * 0.7 : 0.5), 1.8, 2.6, pal.b));
+  const trim = st === 5 || line === 'light' ? GOLD : pal.b;
+  B.ell(cx, by, br, br, (dx, dy, k) => (Math.round(dy) === Math.round(br * 0.15) ? trim : dx < -br * 0.3 && dy < 0 ? WHITE : dy > br * 0.4 || k > 0.8 ? mix(CREAM, INK, 0.12) : CREAM));
+  B.outline(pal.o).onto(F);
+  // 머리 (몸과 테두리로 나뉨)
+  const Hd = new Layer();
+  Hd.ell(cx, hy, hr + 0.5, hr, shade(pal, hr, hr, true));
+  [-1, 1].forEach(si => Hd.ell(cx + si * (hr + 0.5), hy - hr * 0.35, 2, 1.4, WHITE)); // 머리 옆 작은 깃털 — 뽀송몬 때부터
+  Hd.outline(pal.o).onto(F);
+  // 계통 장식
+  const A = new Layer();
+  gear(A, line, cx, Math.round(hy - hr), hr, big);
+  if (line === 'rock' && big) A.ell(cx + br + 3, by + 1, 3, 3.5, (dx, dy) => (Math.abs(dx) < 1 || Math.abs(dy) < 1 ? GOLD : [170, 182, 204])); // 방패
+  if (line === 'flower' && big) for (let i = 0; i < 4; i++) A.set(cx - hr - 1 - (i % 2), hy - 2 + i * 2, [255, 150, 190]); // 리본
+  A.outline(pal.o).onto(F);
+  face(F, cx, Math.round(hy), 2, 3, mood);
+  const H0 = new Layer();
+  const hyHalo = Math.round(hy - hr - (line === 'spark' && big ? 7 : 4) + Math.sin(t / 420));
+  if (st === 5) crown(H0, cx, Math.round(hy - hr - 1));
+  halo(H0, cx, st === 5 ? hyHalo - 3 : hyHalo, line === 'light' && big ? 7 : 5);
+  H0.onto(F);
+  shadow(F, cx, br + 2);
+}
+
+function shadow(F, cx, r) { for (let dx = -r + 1; dx <= r - 1; dx++) if (!F.get(cx + dx, GROUND + 1)) F.set(cx + dx, GROUND + 1, mix(BG, INK, 0.3)); }
+
+function drawGhost(F, pet, t) {
+  const y = 24 + Math.sin(t / 600) * 2, cx = 36;
+  const G = new Layer();
+  G.ell(cx, y, 8, 8, (dx, dy) => (dy > 5 && (Math.round(dx) + Math.floor(t / 200)) % 3 === 0 ? null : mix(BG, WHITE, 0.75)));
+  [-1, 1].forEach(s => G.ell(cx + s * 9, y - 2, 2.5, 1.6, mix(BG, WHITE, 0.8)));
+  G.outline(mix(BG, INK, 0.35)).onto(F);
+  [-3, 3].forEach(dx => { F.set(cx + dx - 1, y - 1, INK); F.set(cx + dx, y - 1, INK); F.set(cx + dx + 1, y - 1, INK); });
+  F.set(cx, y + 3, MOUTH);
+  halo(F, cx, Math.round(y - 11), 4);
+  for (let i = 0; i < 4; i++) { const sy = (t / 60 + i * 11) % 44; F.set(10 + i * 16, GROUND - sy, mix(BG, INK, 0.4)); }
+}
+
+function sparkles(F, cx, cy, r, t) {
+  for (let i = 0; i < 3; i++) {
+    const a = t / 500 + i * 2.1, sx = cx + Math.cos(a) * (r + 7), sy = cy + Math.sin(a) * (r * 0.6) - 2;
+    if ((t / 150 + i) % 4 < 3) {
+      F.set(sx, sy, WHITE);
+      [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => F.set(sx + dx, sy + dy, mix(BG, WHITE, 0.5)));
+    }
+  }
+}
+
+/** pet = {line,branch,xp,hp,alive,height} · t = 시각(ms) · preview = 만들기 전 미리보기 · cheer = 기뻐하는 중 */
 export function draw(ctx, pet, t, { preview = false, cheer = false } = {}) {
-  const px = (x, y, c) => { ctx.fillStyle = `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`; ctx.fillRect(x | 0, y | 0, 1, 1); };
-  ctx.fillStyle = `rgb(${BG})`; ctx.fillRect(0, 0, 64, 44);
-  for (let x = 0; x < 64; x += 2) px(x, 41, mix(BG, INK, .25)); // ground
-  const st=stageOf(pet.xp);const hp=pet.hp;
-  const base=TYPES[pet.type].c;const weak=clamp((50-hp)/50,0,1);
-  const col=mix(base,[150,150,140],weak*.75);const dark=mix(col,INK,.55);
-  
-  if(!pet.alive){ // ghost floating
-    const y=18+Math.sin(t/600)*2;
-    for(let dy=-7;dy<=7;dy++)for(let dx=-7;dx<=7;dx++){if(dx*dx+dy*dy<=49&&!(dy>4&&(dx+Math.floor(t/200))%3===0))px(32+dx,y+dy,mix(BG,[245,245,240],.7))}
-    [[29,y-1],[35,y-1]].forEach(([x,yy])=>{px(x-1,yy-1,INK);px(x+1,yy+1,INK);px(x+1,yy-1,INK);px(x-1,yy+1,INK);px(x,yy,INK)});
-    for(let i=0;i<4;i++){const sy=(t/60+i*11)%40;px(10+i*14,40-sy,mix(BG,INK,.4))}
-    return;
+  const F = new Layer();
+  for (let x = 0; x < W; x += 2) F.set(x, GROUND + 1, mix(BG, INK, 0.2)); // 땅
+  const st = stageOf(pet.xp);
+  if (!pet.alive) drawGhost(F, pet, t);
+  else if (st === 0) drawEgg(F, pet, t, preview);
+  else {
+    const weak = clamp((50 - pet.hp) / 50, 0, 1);
+    const mood = { hp: pet.hp, cheer, weak, blink: t % 3400 < 140 };
+    const pal = palette(st >= 4 ? formLine(pet) : pet.line, weak);
+    const s = 0.92 + clamp((pet.height - 150) / 40, 0, 1) * 0.16;
+    if (st === 1) drawBaby(F, pet, t, mood, pal, s);
+    else if (st === 2) drawKid(F, pet, t, mood, pal, s);
+    else drawChibi(F, pet, t, mood, pal, s, st);
+    if (weak > 0.4) { const sy = (t / 120) % 6; F.set(48, 20 + sy, [90, 150, 230]); F.set(48, 21 + sy, [90, 150, 230]); }
+    if (pet.hp > 85 || st === 5 || cheer) sparkles(F, 36, 30, 14, t);
   }
-  if(st===0){ // egg
-    const wob=Math.sin(t/(preview?400:250))*(1+(pet.xp>8?1:0));
-    const cx=32+wob*.6,cy=27;
-    for(let dy=-11;dy<=11;dy++)for(let dx=-9;dx<=9;dx++){const k=(dx*dx)/(81*(dy<0?0.8:1))+(dy*dy)/121;if(k<=1){const edge=k>.82;px(cx+dx,cy+dy,edge?dark:mix(col,[255,255,255],.35))}}
-    for(let i=-6;i<=6;i+=3)px(cx+i,cy-1+((i/3)%2?1:0),dark); // zigzag band
-    [[-4,5],[3,6],[0,-6]].forEach(([dx,dy])=>{px(cx+dx,cy+dy,col);px(cx+dx+1,cy+dy,col)});
-    return;
-  }
-  const sizes=[0,7,9,11,13,15];const r=sizes[st]*(0.92+clamp((pet.height-150)/40,0,1)*0.16);
-  const speed=200+weak*500;const amp=(cheer?4:1.6)*(1-weak*.8);
-  const bounce=Math.abs(Math.sin(t/speed))*amp;
-  const cx=32,cy=40-r-1-bounce;
-  const squash=1+(cheer?Math.sin(t/90)*.05:0);
-  // shadow
-  for(let dx=-r+2;dx<=r-2;dx++)px(cx+dx,41,mix(BG,INK,.35));
-  // feet
-  const fy=40-bounce*.3;[-r*.45,r*.45].forEach(o=>{for(let i=-1;i<=1;i++)px(cx+o+i,fy,dark)});
-  // arms (thickness by strength)
-  const arm=pet.stats.strength>90?2:1;const armUp=cheer||hp>85;
-  [-1,1].forEach(s=>{for(let i=0;i<3;i++)for(let a=0;a<arm;a++){const ax=cx+s*(r+i);const ay=armUp?cy-2-i:cy+2+i*(weak>0.5?1:0.4);px(ax,ay+a,dark)}
-    if(pet.stats.strength>110){px(cx+s*(r+1),cy-4,dark);px(cx+s*(r+2),cy-4,dark)}});
-  // body
-  for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){const k=(dx*dx)/(r*r*squash)+(dy*dy)/(r*r/squash);if(k<=1){const shade=dy>r*.45||k>.86;px(cx+dx,cy+dy,shade?mix(col,INK,.28):(dx<-r*.3&&dy<-r*.3?mix(col,[255,255,255],.35):col))}}
-  // belly
-  for(let dy=Math.ceil(r*.1);dy<=r*.7;dy++)for(let dx=-r*.45;dx<=r*.45;dx++){if(dx*dx/(r*r*.2)+(dy-r*.4)**2/(r*r*.12)<=1)px(cx+dx,cy+dy,mix(col,[255,250,235],.55))}
-  // flex: antenna wiggle
-  if(pet.stats.flex>70){const w=Math.round(Math.sin(t/180));for(let i=1;i<=3;i++)px(cx+w*(i>1?1:0),cy-r-i,dark);px(cx+w,cy-r-4,[255,212,71])}
-  // power: spikes
-  if(pet.stats.power>80)for(let i=-2;i<=2;i+=2){px(cx+i-3,cy-r+1,dark);px(cx+i-3,cy-r,dark)}
-  // headband (cardio or champion)
-  if(pet.stats.cardio>85||st===5){for(let dx=-r+1;dx<=r-1;dx++)px(cx+dx,cy-r*.45,[226,58,64]);px(cx+r,cy-r*.45+1,[226,58,64]);px(cx+r+1,cy-r*.45+2,[226,58,64])}
-  // face
-  const ey=cy-r*.15,ex=Math.max(2,Math.round(r*.38));const blink=(t%3200)<130;
-  [-1,1].forEach(s=>{const x=cx+s*ex;
-    if(weak>.5||blink){px(x-1,ey,INK);px(x,ey,INK);px(x+1,ey,INK)}
-    else{px(x,ey,INK);px(x,ey-1,INK);if(st>=3){px(x+1,ey,INK);px(x+1,ey-1,INK)}px(x,ey-1,[255,255,255])}});
-  const my=ey+Math.max(2,Math.round(r*.3));
-  if(hp>60||cheer){px(cx-1,my,INK);px(cx,my+1,INK);px(cx+1,my,INK);if(cheer)px(cx,my,INK)}
-  else if(hp>30){px(cx-1,my,INK);px(cx,my,INK);px(cx+1,my,INK)}
-  else{px(cx-1,my+1,INK);px(cx,my,INK);px(cx+1,my+1,INK)}
-  // cheeks
-  if(hp>50){px(cx-ex-1,my-1,[240,120,120]);px(cx+ex+1,my-1,[240,120,120])}
-  // sweat when weak
-  if(weak>.4){const sy=(t/120)%6;px(cx+r-1,cy-r+2+sy,[90,150,230]);px(cx+r-1,cy-r+3+sy,[90,150,230])}
-  // sparkles
-  if(hp>85||st===5||cheer){for(let i=0;i<3;i++){const a=t/500+i*2.1;const sx=cx+Math.cos(a)*(r+6),sy=cy+Math.sin(a)*(r*.6)-2;if((t/150+i)%4<3){px(sx,sy,[255,255,255]);px(sx+1,sy,mix(BG,[255,255,255],.5));px(sx-1,sy,mix(BG,[255,255,255],.5));px(sx,sy+1,mix(BG,[255,255,255],.5));px(sx,sy-1,mix(BG,[255,255,255],.5))}}}
-  // champion crown
-  if(st===5){const y=cy-r-3;[[-2,0],[0,-1],[2,0]].forEach(([dx,dy])=>{px(cx+dx,y+dy,[255,212,71])});for(let dx=-2;dx<=2;dx++)px(cx+dx,y+1,[255,212,71])}
+  const img = ctx.createImageData(W, H);
+  F.p.forEach((c, i) => { const col = c || BG; img.data[i * 4] = col[0]; img.data[i * 4 + 1] = col[1]; img.data[i * 4 + 2] = col[2]; img.data[i * 4 + 3] = 255; });
+  ctx.putImageData(img, 0, 0);
 }
