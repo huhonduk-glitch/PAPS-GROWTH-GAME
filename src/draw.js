@@ -7,6 +7,7 @@ export const W = 72, H = 54;
 const GROUND = 50;
 const INK = [44, 40, 60], BG = [185, 201, 160];
 const WHITE = [255, 255, 255], CREAM = [255, 246, 228], PINK = [255, 150, 168], MOUTH = [150, 60, 78];
+const SIL = [86, 96, 110], SIL_BG = [214, 222, 230]; // 도감: 아직 못 만난 모습
 const NIGHT = [36, 44, 92], BLANKET = [120, 170, 228], BLANKET_L = [168, 204, 244];
 const GOLD = [255, 210, 80], GOLD_D = [214, 150, 40], WING_S = [214, 226, 244], WING_O = [128, 148, 190];
 const mix = (a, b, k) => a.map((v, i) => v + (b[i] - v) * k);
@@ -142,6 +143,7 @@ function drawEgg(F, pet, t, preview, still) {
   });
   E.outline(mix(pal.o, INK, 0.2)).onto(F);
   if (pet.xp >= 12) [[-2, -6], [-1, -5], [0, -6], [1, -5], [2, -6]].forEach(([dx, dy]) => F.set(cx + dx, cy + dy, INK)); // 금
+  return { top: [cx, cy - 12], hand: [cx + 13, cy + 6] };
 }
 
 function drawBaby(F, pet, t, mood, pal, s) {
@@ -159,6 +161,7 @@ function drawBaby(F, pet, t, mood, pal, s) {
   B.outline(pal.o).onto(F);
   face(F, cx, Math.round(cy - 1), 2, 2, mood);
   shadow(F, cx, r);
+  return { top: [cx, cy - r], hand: [cx + r + 6, cy + 3] };
 }
 
 function drawKid(F, pet, t, mood, pal, s) {
@@ -171,12 +174,13 @@ function drawKid(F, pet, t, mood, pal, s) {
   const B = new Layer();
   [-1, 1].forEach(si => B.ell(cx + si * r * 0.45, GROUND - 1 - bounce * 0.3, 2.4, 1.6, pal.s)); // 발
   B.ell(cx, cy, r + 0.5, r - 0.5, shade(pal, r, r));
-  B.ell(cx, cy + r * 0.4, r * 0.55, r * 0.38, CREAM); // 배
+  B.ell(cx, cy + r * 0.4, r * 0.55, r * 0.38, mood.cloth || CREAM); // 배 (운동복을 입으면 그 색)
   B.outline(pal.o).onto(F);
   const A = new Layer(); gear(A, pet.line, cx, Math.round(cy - r), r, false); A.outline(pal.o).onto(F);
   face(F, cx, Math.round(cy - 1), 3, 2, mood);
   const H0 = new Layer(); halo(H0, cx, Math.round(cy - r - 4 + Math.sin(t / 400)), 4); H0.onto(F);
   shadow(F, cx, r);
+  return { top: [cx, cy - r], hand: [cx + r + 6, cy + 3] };
 }
 
 function drawChibi(F, pet, t, mood, pal, s, st) {
@@ -199,7 +203,8 @@ function drawChibi(F, pet, t, mood, pal, s, st) {
   const armUp = mood.cheer || pet.hp > 85;
   [-1, 1].forEach(si => B.ell(cx + si * (br + 1), by + (armUp ? -br * 0.7 : 0.5), 1.8, 2.6, pal.b));
   const trim = st === 5 || line === 'light' ? GOLD : pal.b;
-  B.ell(cx, by, br, br, (dx, dy, k) => (Math.round(dy) === Math.round(br * 0.15) ? trim : dx < -br * 0.3 && dy < 0 ? WHITE : dy > br * 0.4 || k > 0.8 ? mix(CREAM, INK, 0.12) : CREAM));
+  const cloth = mood.cloth || CREAM; // 운동복을 입으면 그 색
+  B.ell(cx, by, br, br, (dx, dy, k) => (Math.round(dy) === Math.round(br * 0.15) ? trim : dx < -br * 0.3 && dy < 0 ? mix(cloth, WHITE, 0.6) : dy > br * 0.4 || k > 0.8 ? mix(cloth, INK, 0.12) : cloth));
   B.outline(pal.o).onto(F);
   // 머리 (몸과 테두리로 나뉨)
   const Hd = new Layer();
@@ -219,6 +224,7 @@ function drawChibi(F, pet, t, mood, pal, s, st) {
   halo(H0, cx, st === 5 ? hyHalo - 3 : hyHalo, line === 'light' && big ? 7 : 5);
   H0.onto(F);
   shadow(F, cx, br + 2);
+  return { top: [cx, hy - hr], hand: [cx + br + 6, by + 1] };
 }
 
 function shadow(F, cx, r) { for (let dx = -r + 1; dx <= r - 1; dx++) if (!F.get(cx + dx, GROUND + 1)) F.set(cx + dx, GROUND + 1, mix(BG, INK, 0.3)); }
@@ -277,30 +283,48 @@ function sparkles(F, cx, cy, r, t) {
 /**
  * pet = {line,branch,xp,hp,sleeping,height} · t = 시각(ms) · preview = 만들기 전 미리보기 · cheer = 기뻐하는 중
  * resting = 휴식권 쓰는 중(이불). 잠듦은 밤 화면 + Z 로, 체력 낮은 모습과 헷갈리지 않게 한다.
+ * wear = 꾸미기 {hat:'이모지', prop:'이모지', bg:[r,g,b], outfit:[r,g,b]} — 체형은 바꾸지 않고 얹기만 한다.
+ * silhouette = 도감에서 아직 못 만난 모습 (검은 그림자)
  */
-export function draw(ctx, pet, t, { preview = false, cheer = false, resting = false } = {}) {
+export function draw(ctx, pet, t, { preview = false, cheer = false, resting = false, wear = {}, silhouette = false } = {}) {
   const F = new Layer(), top = new Layer();
-  for (let x = 0; x < W; x += 2) F.set(x, GROUND + 1, mix(BG, INK, 0.2)); // 땅
+  const base = silhouette ? SIL_BG : wear.bg || BG;
+  for (let x = 0; x < W; x += 2) F.set(x, GROUND + 1, mix(base, INK, 0.2)); // 땅
   const st = stageOf(pet.xp);
-  const sleep = !preview && !!pet.sleeping;
-  resting = resting && !sleep;
-  if (st === 0) drawEgg(F, pet, t, preview, sleep || resting);
+  const sleep = !preview && !silhouette && !!pet.sleeping;
+  resting = resting && !sleep && !silhouette;
+  cheer = cheer && !silhouette;
+  let at;
+  if (st === 0) at = drawEgg(F, pet, t, preview, sleep || resting || silhouette);
   else {
     const weak = sleep ? 0.2 : clamp((50 - pet.hp) / 50, 0, 1);
-    const still = sleep ? 1 : resting ? Math.max(weak, 0.6) : weak; // 움직임 줄이기 (잠듦 = 숨 쉬는 정도)
-    const mood = { hp: pet.hp, cheer: cheer && !sleep, weak: still, sleep, blink: t % 3400 < 140 };
+    const still = sleep || silhouette ? 1 : resting ? Math.max(weak, 0.6) : weak; // 움직임 줄이기 (잠듦 = 숨 쉬는 정도)
+    const mood = { hp: pet.hp, cheer: cheer && !sleep, weak: still, sleep, blink: t % 3400 < 140, cloth: wear.outfit };
     const pal = palette(st >= 4 ? formLine(pet) : pet.line, weak);
     const s = 0.92 + clamp((pet.height - 150) / 40, 0, 1) * 0.16;
-    if (st === 1) drawBaby(F, pet, t, mood, pal, s);
-    else if (st === 2) drawKid(F, pet, t, mood, pal, s);
-    else drawChibi(F, pet, t, mood, pal, s, st);
-    if (!sleep && !resting && weak > 0.4) { const sy = (t / 120) % 6; F.set(48, 20 + sy, [90, 150, 230]); F.set(48, 21 + sy, [90, 150, 230]); }
-    if (!sleep && (pet.hp > 85 || st === 5 || cheer)) sparkles(F, 36, 30, 14, t);
+    if (st === 1) at = drawBaby(F, pet, t, mood, pal, s);
+    else if (st === 2) at = drawKid(F, pet, t, mood, pal, s);
+    else at = drawChibi(F, pet, t, mood, pal, s, st);
+    if (!sleep && !resting && !silhouette && weak > 0.4) { const sy = (t / 120) % 6; F.set(48, 20 + sy, [90, 150, 230]); F.set(48, 21 + sy, [90, 150, 230]); }
+    if (!sleep && !silhouette && (pet.hp > 85 || st === 5 || cheer)) sparkles(F, 36, 30, 14, t);
   }
   if (resting) blanket(F, 36, GROUND - [7, 4, 5, 9, 9, 9][st]); // 얼굴은 가리지 않게
   if (sleep) zzz(top, t);
   else if (cheer) hearts(F, t);
   const img = ctx.createImageData(W, H);
-  F.p.forEach((c, i) => { const col = top.p[i] || (sleep ? mix(c || BG, NIGHT, 0.45) : c || BG); img.data[i * 4] = col[0]; img.data[i * 4 + 1] = col[1]; img.data[i * 4 + 2] = col[2]; img.data[i * 4 + 3] = 255; });
+  F.p.forEach((c, i) => {
+    const col = silhouette ? (c ? SIL : SIL_BG) : top.p[i] || (sleep ? mix(c || base, NIGHT, 0.45) : c || base);
+    img.data[i * 4] = col[0]; img.data[i * 4 + 1] = col[1]; img.data[i * 4 + 2] = col[2]; img.data[i * 4 + 3] = 255;
+  });
   ctx.putImageData(img, 0, 0);
+  if (!silhouette) wearOn(ctx, at, wear, resting);
+}
+/** 모자(머리 위)·소품(옆)을 이모지로 얹는다. 나중에 픽셀 그림으로 바꿔도 위치(at)는 그대로 쓰면 됨 */
+function wearOn(ctx, at, wear, resting) {
+  if (!at || !(wear.hat || wear.prop)) return;
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  if (wear.hat) { ctx.font = '11px sans-serif'; ctx.fillText(wear.hat, at.top[0], at.top[1] + 4); }
+  if (wear.prop && !resting) { ctx.font = '9px sans-serif'; ctx.fillText(wear.prop, at.hand[0], at.hand[1] + 5); }
+  ctx.restore();
 }

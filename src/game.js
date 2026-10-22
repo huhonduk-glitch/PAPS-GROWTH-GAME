@@ -3,10 +3,14 @@
 import {
   WAKE_UP_HP, EXAM_REST_MAX_DAYS, EXAM_REST_PER_TERM, SICK_REST_PER_MONTH, TERM1_MONTHS,
   QUESTS_PER_DAY, QUEST_COIN, DAILY_ALL_CLEAR_BONUS,
+  ANNIVERSARY_DAYS, STREAK_ANNIVERSARY_DAYS, ANNIVERSARY_GIFTS, COMEBACK_DAYS,
 } from './config/game.js';
 import { QUESTS, QUEST_CATEGORIES } from './config/quests.js';
+import { ITEMS } from './config/items.js';
+import { DIALOGUES } from './config/dialogues.js';
+import { STAGE_LABEL, LINE_TRAIT, DEX_TEXT } from './config/dex.js';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 /* ---------- 단계 · 계통 ---------- */
 export const STAGES = [[0, '알'], [20, '아기'], [120, '꼬마'], [400, '청소년'], [900, '어른'], [1600, '챔피언']];
@@ -191,7 +195,10 @@ export function newPet(name, st, today) {
 }
 const emptyPasses = () => ({ exam: [], sick: [] });
 export function newState(pet, today, offset = 0) {
-  return { v: SAVE_VERSION, offset, logs: {}, rest: {}, weeks: {}, passes: emptyPasses(), coins: 0, lastEval: today, pet };
+  return {
+    v: SAVE_VERSION, offset, logs: {}, rest: {}, weeks: {}, passes: emptyPasses(), coins: 0,
+    dex: dexKeysOf(pet), items: emptyItems(), anniv: {}, lastOpen: today, lastEval: today, pet,
+  };
 }
 
 /** PAPS·인바디를 다시 쟀을 때: 새 기준값 + 그동안 운동으로 오른 만큼. 계통은 그대로 */
@@ -208,6 +215,7 @@ function addXp(S, n) {
   S.pet.xp += n;
   const st1 = stageOf(S.pet.xp);
   if (st1 >= 4 && !S.pet.branch) S.pet.branch = branchFromTraining(S.pet.train, S.pet.line);
+  recordDex(S);
   return st1 > st0;
 }
 
@@ -309,16 +317,118 @@ export function completeQuest(S, today, id, verify, at = Date.now()) {
   S.coins = (S.coins || 0) + coin + bonus;
   return { ok: true, coin, bonus, allClear: bonus > 0 };
 }
-/** 퀘스트 연속 기록: 1개 이상 끝낸 날이 이어진 수. 주 1회 휴식일·휴식권 날은 끊지 않고 건너뜀 (+ 오늘 했으면 1) */
-export function questStreak(S, today) {
-  const did = L => !!(L && L.quests && Object.keys(L.quests.done).length);
+/**
+ * 화면에 보여주는 연속 기록 (하나로 합침): 그날 퀘스트 1개 이상 했거나, 운동(또는 휴식일)+끼니 인증을 했으면 그날은 이어짐.
+ * 주 1회 휴식일·휴식권 날은 끊지 않고 건너뜀 (+ 오늘 이미 했으면 1).
+ * 확실한 인증만 세는 streak() 는 따로 남겨 둔다 (Phase 5 노력 랭킹용 — 자기 체크는 랭킹에 넣지 않음).
+ */
+export function dayStreak(S, today) {
+  const quest = L => !!(L && L.quests && Object.keys(L.quests.done).length);
+  const did = L => quest(L) || !!(L && L.meals.length > 0 && (L.status === 'ex' || L.status === 'rest'));
   let n = 0;
   for (let d = addDay(today, -1); ; d = addDay(d, -1)) {
     const L = S.logs[d];
     if (did(L)) n++;
     else if (!(L && (L.status === 'rest' || L.status === 'pass' || restPassOn(S, d)))) break;
   }
-  return n + (did(S.logs[today]) ? 1 : 0);
+  const T = S.logs[today];
+  return n + (quest(T) || (T && T.meals.length > 0 && cappedMinutes(T) >= RULES.exGoal) ? 1 : 0);
+}
+
+/* ---------- 도감 ---------- */
+export const dexKey = (st, line) => `${st}-${line}`;
+/** 도감 칸 전부: 단계 × 계통 (page 로 나눠 두어 나중에 합체 진화 혼합종 쪽을 더할 수 있음) */
+export function dexEntries() {
+  return STAGES.flatMap((s, st) => Object.keys(LINES).map(line => ({
+    key: dexKey(st, line), page: 'solo', st, line, name: speciesName({ line, branch: line, xp: s[0] }),
+    desc: DEX_TEXT[dexKey(st, line)] || `${LINES[line].n} 계통 ${STAGE_LABEL[st]} — ${LINE_TRAIT[line]}`,
+  })));
+}
+/** 이 튼튼몬이 거쳐 온 모습 (알 ~ 지금 단계). 어른부터는 갈래 계통 */
+export function dexKeysOf(pet) {
+  const out = [];
+  for (let i = 0; i <= stageOf(pet.xp); i++) out.push(dexKey(i, i >= 4 ? formLine(pet) : pet.line));
+  return out;
+}
+/** 새로 만난 모습을 도감에 적는다. 새로 적은 칸을 돌려줌 */
+export function recordDex(S) {
+  S.dex = S.dex || [];
+  const added = dexKeysOf(S.pet).filter(k => !S.dex.includes(k));
+  S.dex.push(...added);
+  return added;
+}
+
+/* ---------- 꾸미기 (코인으로 사고, 체형은 바꾸지 않음) ---------- */
+const emptyItems = () => ({ owned: [], wear: {} });
+const invOf = S => S.items || (S.items = emptyItems());
+export const itemOf = id => ITEMS.find(x => x.id === id) || null;
+/** 사기. 결과 {ok, reason?: 'unknown'|'limited'|'owned'|'coins'} */
+export function buyItem(S, id) {
+  const it = itemOf(id), I = invOf(S);
+  if (!it) return { ok: false, reason: 'unknown' };
+  if (it.limited || !(it.price >= 0)) return { ok: false, reason: 'limited' };
+  if (I.owned.includes(id)) return { ok: false, reason: 'owned' };
+  if ((S.coins || 0) < it.price) return { ok: false, reason: 'coins' };
+  S.coins -= it.price;
+  I.owned.push(id);
+  return { ok: true };
+}
+/** 선물로 받기 (기념일). 새로 받았으면 true */
+export function grantItem(S, id) {
+  const I = invOf(S);
+  if (!itemOf(id) || I.owned.includes(id)) return false;
+  I.owned.push(id);
+  return true;
+}
+/** 쓰기 (갈래마다 하나) · 벗기 */
+export function wearItem(S, id) {
+  const it = itemOf(id), I = invOf(S);
+  if (!it || !I.owned.includes(id)) return false;
+  I.wear[it.category] = id;
+  return true;
+}
+export function takeOff(S, category) { delete invOf(S).wear[category]; }
+/** 그림에 넘길 꾸미기 {hat, prop: 이모지, bg, outfit: 색} */
+export function wearLook(S) {
+  const w = (S && S.items && S.items.wear) || {}, g = c => itemOf(w[c]);
+  return { hat: g('hat') && g('hat').icon, prop: g('prop') && g('prop').icon, bg: g('bg') && g('bg').color, outfit: g('outfit') && g('outfit').color };
+}
+
+/* ---------- 기념일 ---------- */
+/** DAY 숫자 (알 받은 날 = 1일) */
+export const dayNumber = (S, today) => daysBetween(S.pet.born, today) + 1;
+/** 아직 축하 안 한 기념일 (지나간 것도 늦게라도 챙김) */
+export function pendingAnniversaries(S, today) {
+  const done = S.anniv || {}, day = dayNumber(S, today), st = dayStreak(S, today), out = [];
+  ANNIVERSARY_DAYS.forEach(n => { if (day >= n && !done[`day${n}`]) out.push({ id: `day${n}`, type: 'day', n, item: ANNIVERSARY_GIFTS.day[n] || null }); });
+  STREAK_ANNIVERSARY_DAYS.forEach(n => { if (st >= n && !done[`streak${n}`]) out.push({ id: `streak${n}`, type: 'streak', n, item: ANNIVERSARY_GIFTS.streak[n] || null }); });
+  return out;
+}
+/** 축하하고 한정 꾸미기를 준다. 처음이면 true */
+export function celebrate(S, today, a) {
+  S.anniv = S.anniv || {};
+  if (S.anniv[a.id]) return false;
+  S.anniv[a.id] = today;
+  if (a.item) grantItem(S, a.item);
+  return true;
+}
+
+/* ---------- 감정 표현 (대사) ---------- */
+/** 날짜로 정해지는 난수 — 하루 동안 같은 대사를 보여줄 때 */
+export const dayRnd = day => seeded(day);
+/** 상황에 맞는 대사 하나 {text, face} (여러 줄 중 무작위) */
+export function pickLine(key, rnd = Math.random) {
+  const D = DIALOGUES[key];
+  if (!D || !D.lines.length) return null;
+  return { text: D.lines[Math.floor(rnd() * D.lines.length)], face: D.face || 'normal' };
+}
+/** 앱을 열 때 인사 상황: 'comeback'(오래 안 옴) | 'morning' | 'hello' | null(오늘 이미 옴). 마지막 접속일을 적는다 */
+export function greeting(S, today, hour) {
+  const last = S.lastOpen;
+  S.lastOpen = today;
+  if (last === today) return null;
+  if (last && daysBetween(last, today) >= COMEBACK_DAYS) return 'comeback';
+  return hour >= 5 && hour < 11 ? 'morning' : 'hello';
 }
 
 /* ---------- 하루 정산 ---------- */
@@ -517,7 +627,7 @@ export function streak(S, today) {
   return n;
 }
 
-/* ---------- 예전 저장 옮기기 (v1 → v2 → v3 → v4) ---------- */
+/* ---------- 예전 저장 옮기기 (v1 → v2 → v3 → v4 → v5) ---------- */
 const V1_STAGES = [0, 15, 60, 140, 260, 420];
 /** 예전 경험치 → 새 경험치 (같은 단계, 같은 비율 위치) */
 export function migrateXp(xp) {
@@ -533,6 +643,7 @@ export function migrate(v) {
   if (v.v === 1) v = migrateV1(v);
   if (v.v === 2) v = migrateV2(v);
   if (v.v === 3) v = { ...v, v: 4, coins: v.coins || 0 }; // v3 → v4: 코인 칸 추가
+  if (v.v === 4) v = { ...v, v: 5, dex: v.pet.line ? dexKeysOf(v.pet) : [], items: emptyItems(), anniv: {}, lastOpen: null }; // v4 → v5: 도감·꾸미기·기념일
   return v.v === SAVE_VERSION ? v : null;
 }
 /** v2 → v3: 소멸(alive:false)은 잠듦으로. 휴식권 칸 추가 */

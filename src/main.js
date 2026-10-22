@@ -4,11 +4,15 @@ import {
   STAGES, LINES, STAT_KEYS, STAT_NAMES, EX_KINDS, CAT_NAMES, INTENSITY, PROOFS, SLOTS, PLACES, GROUPS, GROUP_KEYS, DRINKS,
   SCHOOL_LUNCH, SPECIES, RULES, clamp, addDay, daysBetween, todayKey, keyOf, fromMin, stageOf, kindOf, exMinutes, cappedMinutes,
   balancedCount, dayGroups, statsFromInputs, lineFromStats, branchFromTraining, speciesName, newPet, newState, evaluate,
-  certExercise, certMeal, weekId, weekCounts, weekMissions, streak, remeasure,
+  certExercise, certMeal, weekId, weekCounts, weekMissions, remeasure,
   restPassOn, passesLeft, useSickPass, useExamPass, cancelExamPass,
-  questOf, questCoin, todayQuests, completeQuest, questStreak,
+  questOf, questCoin, todayQuests, completeQuest, dayStreak,
+  dexEntries, itemOf, buyItem, wearItem, takeOff, wearLook, pendingAnniversaries, celebrate, pickLine, dayRnd, greeting,
 } from './game.js';
 import { LOW_HP_WARN, EXAM_REST_MAX_DAYS, DAILY_ALL_CLEAR_BONUS, QUEST_CHEER_MS } from './config/game.js';
+import { ITEMS, ITEM_CATEGORIES } from './config/items.js';
+import { INDOOR_KINDS } from './config/dialogues.js';
+import { STAGE_LABEL } from './config/dex.js';
 import { draw } from './draw.js';
 import { load, save as store, clear } from './storage.js';
 
@@ -103,9 +107,12 @@ function onCertEx() {
   if (!r.ok) { toast(EX_FAIL[r.reason]); return; }
   save(); closePanels(); render();
   if (r.woke) welcome();
-  else if (r.grew) say(`${S.pet.name}(이)가 ${speciesName(S.pet)}(으)로 자랐어요!`, true);
+  else if (r.grew) grewSay();
   else if (r.counted === 0) say(`오늘은 ${RULES.exDailyCap}분을 다 채웠어요. 이제 푹 쉬어요.`);
-  else say(`${sel.ex} ${r.min}분 인증! 경험치 +${r.gain}${r.flag ? ' (확인 필요)' : ''}`);
+  else if (r.flag) say(`${sel.ex} ${r.min}분 인증! 경험치 +${r.gain} (확인 필요)`);
+  else if (r.parts.includes(`하루 ${RULES.exGoalPlus}분`)) sayLine('ex_60', ` 경험치 +${r.gain}`);
+  else if (INDOOR_KINDS.includes(sel.ex)) sayLine('indoor_ex', ` 경험치 +${r.gain}`);
+  else say(`${sel.ex} ${r.min}분 인증! 경험치 +${r.gain}`);
   photos.ex = null; $('exPrev').hidden = true; $('exPhoto').value = '';
 }
 let startTouched = false;
@@ -138,9 +145,10 @@ function onCertMeal() {
   if (!r.ok) { toast(`${sel.slot}은 이미 인증했어요.`); return; }
   save(); closePanels(); render();
   if (r.woke) welcome();
-  else if (r.grew) say(`${S.pet.name}(이)가 ${speciesName(S.pet)}(으)로 자랐어요!`, true);
-  else if (r.rainbow) say(`무지개 식단 완성! 오늘 식품군 5가지를 다 먹었어요. +${r.gain}`, true);
-  else say(r.tier === 'plain' ? `${sel.slot} 인증! 다음엔 한 가지 더 곁들여 봐요. +${r.gain}` : `${sel.slot} ${r.tier === 'great' ? '아주 좋은 한 끼' : '균형식'} 인증! 경험치 +${r.gain}`);
+  else if (r.grew) grewSay();
+  else if (r.rainbow) sayLine('rainbow', ` +${r.gain}`);
+  else if (r.tier !== 'plain') sayLine('balanced_meal', ` 경험치 +${r.gain}`);
+  else say(`${sel.slot} 인증! 다음엔 한 가지 더 곁들여 봐요. +${r.gain}`);
   photos.meal = null; $('mealPrev').hidden = true; $('mealPhoto').value = '';
 }
 function slotByTime() {
@@ -191,8 +199,9 @@ function chips(box, items, isOn, onTap) {
 function syncChips() { chipSets.forEach(box => [...box.children].forEach(b => b._sync())); }
 
 /* ---------- 화면 ---------- */
-function openPanel(id) { closePanels(); $(id).hidden = false; $(id).scrollIntoView({ behavior: 'smooth', block: 'start' }); if (id === 'infoPanel') renderInfo(); }
-function closePanels() { ['exPanel', 'mealPanel', 'infoPanel'].forEach(i => $(i).hidden = true); if (S) $('setup').hidden = true; }
+const PANELS = { infoPanel: () => renderInfo(), dexPanel: () => renderDex(), shopPanel: () => renderShop() };
+function openPanel(id) { closePanels(); $(id).hidden = false; $(id).scrollIntoView({ behavior: 'smooth', block: 'start' }); if (PANELS[id]) PANELS[id](); }
+function closePanels() { ['exPanel', 'mealPanel', 'infoPanel', 'dexPanel', 'shopPanel'].forEach(i => $(i).hidden = true); if (S) $('setup').hidden = true; }
 let toastT;
 function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2800); }
 let cheerUntil = 0;
@@ -200,12 +209,15 @@ let cheerUntil = 0;
 function say(m, cheer) { $('lcdMsg').textContent = m; if (cheer) cheerUntil = performance.now() + (cheer === true ? 2500 : cheer); }
 
 /** 잠에서 깨어났을 때 — 처벌보다 반겨 주기 */
-function welcome() { say(`다시 만나서 반가워! ${S.pet.name}(이)가 깨어났어요. 오늘도 같이 해요!`, true); }
+function welcome() { sayLine('wake'); }
+/** 상황 대사 (config/dialogues.js) — 여러 줄 중 무작위, 표정도 같이 */
+function sayLine(key, extra = '') { const l = pickLine(key); if (l) say(l.text + extra, l.face === 'cheer'); }
+function grewSay() { say(`${S.pet.name}(이)가 ${speciesName(S.pet)}(으)로 자랐어요! 도감에 새 모습이 생겼어요.`, true); }
 function moodLine() {
   const p = S.pet; const L = S.logs[today()];
   if (p.sleeping) return `쿨쿨… ${p.name}(이)가 자고 있어요. 운동 한 번이면 깨어나요! (간식 말고 끼니 인증도 좋아요)`;
   if (restPassOn(S, today())) return `푹 쉬고 와요. 오늘은 체력이 줄지 않아요.`;
-  if (p.hp <= LOW_HP_WARN) return `졸려요… 같이 움직이자! 조금만 운동해도 힘이 나요.`;
+  if (p.hp <= LOW_HP_WARN) return pickLine('low_hp', dayRnd(today())).text; // 하루 동안 같은 대사
   if (p.hp < 25) return '너무 힘이 없어요… 오늘 꼭 움직이고 잘 챙겨 먹어 주세요.';
   if (p.hp < 50) return `조금 시들시들해요. 운동 ${RULES.exGoal}분이면 기운이 나요.`;
   const ex = exMinutes(L), meals = L ? L.meals.length : 0;
@@ -216,7 +228,7 @@ function moodLine() {
 }
 function render() {
   const has = !!S;
-  $('keys').hidden = !has; $('demo').hidden = !has; $('questCard').hidden = !has;
+  $('keys').hidden = !has; $('demo').hidden = !has; $('questCard').hidden = !has; $('subkeys').hidden = !has;
   if (!has) {
     $('setup').hidden = false; setupMode = 'new'; openSetupLabels();
     $('petName').textContent = '새 알'; $('stageTxt').textContent = '알'; $('dayTxt').textContent = 'DAY 1'; setBars(RULES.startHp, 0); renderLineBox(); return;
@@ -228,13 +240,79 @@ function render() {
   setBars(p.hp, p.xp);
   if (performance.now() > cheerUntil) $('lcdMsg').textContent = moodLine();
   renderQuests();
+  showAnniversary();
+}
+
+/* ---------- 도감 ---------- */
+let dexPick = null;
+function renderDex() {
+  const all = dexEntries(), have = new Set(S.dex || []);
+  $('dexCount').textContent = `만난 모습 ${all.filter(e => have.has(e.key)).length} / ${all.length}`;
+  $('dexGrid').innerHTML = '';
+  all.forEach(e => {
+    const met = have.has(e.key), b = document.createElement('button');
+    b.className = 'dexcell' + (met ? '' : ' unmet') + (dexPick === e.key ? ' on' : '');
+    b.setAttribute('aria-label', met ? e.name : '아직 못 만난 모습');
+    const c = document.createElement('canvas'); c.width = 72; c.height = 54;
+    draw(c.getContext('2d'), { line: e.line, branch: e.st >= 4 ? e.line : null, xp: STAGES[e.st][0], hp: 80, height: 165 }, 1000, { silhouette: !met });
+    const n = document.createElement('span'); n.textContent = met ? e.name : '???';
+    b.append(c, n);
+    b.onclick = () => { dexPick = e.key; renderDex(); };
+    $('dexGrid').appendChild(b);
+  });
+  const e = all.find(x => x.key === dexPick);
+  $('dexDetail').textContent = !e ? '칸을 누르면 설명이 나와요. 운동 갈래에 따라 어른 모습이 달라져요.'
+    : have.has(e.key) ? `${e.name} · ${e.desc}` : `아직 못 만났어요 — ${LINES[e.line].n} 계통 ${STAGE_LABEL[e.st]}. 계속 키우면 만날 수 있어요!`;
+}
+
+/* ---------- 꾸미기 상점 (코인으로 사고, 보관함에서 쓰기·벗기) ---------- */
+let shopCat = 'hat';
+const shopCtx = $('shopCv').getContext('2d');
+const BUY_FAIL = { coins: '코인이 모자라요. 오늘의 퀘스트로 모아 봐요!', owned: '이미 가지고 있어요.', limited: '기념일에만 받을 수 있어요.', unknown: '없는 아이템이에요.' };
+function renderShop() {
+  const I = S.items, wear = I.wear;
+  $('shopCoins').textContent = `🪙 ${S.coins || 0}`;
+  $('shopCats').innerHTML = Object.entries(ITEM_CATEGORIES).map(([k, n]) => `<button class="chip" type="button" aria-pressed="${k === shopCat}" data-cat="${k}">${n}</button>`).join('');
+  $('shopCats').querySelectorAll('[data-cat]').forEach(b => b.onclick = () => { shopCat = b.dataset.cat; renderShop(); });
+  const list = ITEMS.filter(it => it.category === shopCat && (!it.limited || I.owned.includes(it.id)));
+  const locked = ITEMS.filter(it => it.category === shopCat && it.limited && !I.owned.includes(it.id)).length;
+  $('shopList').innerHTML = list.map(it => {
+    const own = I.owned.includes(it.id), on = wear[it.category] === it.id;
+    const icon = it.color ? `<span class="swatch" style="background:rgb(${it.color})">${it.icon}</span>` : `<span class="swatch">${it.icon}</span>`;
+    const act = on ? `<button class="btn ghost small" data-off="${it.category}">벗기</button>`
+      : own ? `<button class="btn small" data-wear="${it.id}">쓰기</button>`
+      : `<button class="btn small" data-buy="${it.id}"${(S.coins || 0) < it.price ? ' disabled' : ''}>🪙 ${it.price}</button>`;
+    return `<div class="shopi${on ? ' on' : ''}">${icon}<span class="sname">${esc(it.name)}${it.limited ? ' <em>기념일 선물</em>' : own ? ' <em>보관함</em>' : ''}</span>${act}</div>`;
+  }).join('') + (locked ? `<p class="hint">🎁 기념일에만 받는 한정 꾸미기 ${locked}개가 더 있어요.</p>` : '');
+  $('shopList').querySelectorAll('[data-buy]').forEach(b => twoTap(b, () => {
+    const r = buyItem(S, b.dataset.buy);
+    if (!r.ok) { toast(BUY_FAIL[r.reason]); renderShop(); return; }
+    wearItem(S, b.dataset.buy); save(); renderShop(); renderQuests();
+    say(`${itemOf(b.dataset.buy).name}! 잘 어울려요.`, true);
+  }));
+  $('shopList').querySelectorAll('[data-wear]').forEach(b => b.onclick = () => { wearItem(S, b.dataset.wear); save(); renderShop(); });
+  $('shopList').querySelectorAll('[data-off]').forEach(b => b.onclick = () => { takeOff(S, b.dataset.off); save(); renderShop(); });
+}
+
+/* ---------- 기념일 축하 ---------- */
+function showAnniversary() {
+  if (!S || !$('annModal').hidden) return;
+  const a = pendingAnniversaries(S, today())[0];
+  if (!a) return;
+  celebrate(S, today(), a); save(); // 보여 주는 순간 선물을 넣음 (창을 닫아도 받음)
+  const it = a.item && itemOf(a.item);
+  $('annTitle').textContent = a.type === 'day' ? `${S.pet.name}(이)와 함께한 지 ${a.n}일!` : `연속 기록 ${a.n}일 달성!`;
+  $('annText').textContent = a.type === 'day' ? `알을 받은 날부터 ${a.n}일째예요. 늘 함께해 줘서 고마워요!` : `${a.n}일 동안 꾸준히 해냈어요. 정말 대단해요!`;
+  $('annGift').textContent = it ? `기념 선물: ${it.icon} ${it.name} — 꾸미기에서 써 보세요` : '';
+  $('annModal').hidden = false;
+  say('🎉 오늘은 기념일이에요!', true);
 }
 
 /* ---------- 오늘의 퀘스트 (코인만 · 경험치·체력·진화와 따로) ---------- */
 let photoQuest = null;
 function renderQuests() {
   const t = today(), fresh = !(S.logs[t] && S.logs[t].quests);
-  const Q = todayQuests(S, t), n = questStreak(S, t);
+  const Q = todayQuests(S, t), n = dayStreak(S, t);
   if (fresh) save(); // 처음 뽑은 3개를 저장 → 같은 날은 늘 같음
   const doneN = Q.ids.filter(id => Q.done[id]).length;
   $('coinTxt').textContent = `🪙 ${S.coins || 0}`;
@@ -255,7 +333,7 @@ function finishQuest(id, verify) {
   const r = completeQuest(S, today(), id, verify);
   if (!r.ok) { renderQuests(); return; }
   save(); renderQuests();
-  if (r.allClear) { say(`오늘의 퀘스트 모두 완료! 보너스 코인 +${r.bonus}`, QUEST_CHEER_MS); toast(`🎉 오늘 퀘스트를 다 했어요! 코인 +${r.coin + r.bonus}`); }
+  if (r.allClear) { say(`${pickLine('quest_clear').text} 보너스 코인 +${r.bonus}`, QUEST_CHEER_MS); toast(`🎉 오늘 퀘스트를 다 했어요! 코인 +${r.coin + r.bonus}`); }
   else say(`퀘스트 완료! 코인 +${r.coin}`, QUEST_CHEER_MS);
 }
 /** 사진 퀘스트: 사진은 저장하지 않는다 — 잠깐 미리보기만 보여주고 버리고, 끝낸 시각만 남김 */
@@ -285,7 +363,7 @@ function renderInfo() {
     const b = branchFromTraining(p.train, p.line), next = STAGES[st + 1];
     evo = `다음 단계까지 경험치 ${next[0] - p.xp} · 지금대로라면 어른이 될 때 <b>${SPECIES[4][b]}</b>(${LINES[b].n} 계통)`;
   }
-  $('evoBox').innerHTML = `<div class="ln"><span class="sw" style="background:rgb(${L.c})"></span>${esc(speciesName(p))} · ${L.n} 계통</div><div>${evo}</div><div class="hint">지금까지 운동: ${tr}</div><div class="hint">연속 기록 ${streak(S, t)}일 (운동·휴식일 + 끼니 인증)</div>`;
+  $('evoBox').innerHTML = `<div class="ln"><span class="sw" style="background:rgb(${L.c})"></span>${esc(speciesName(p))} · ${L.n} 계통</div><div>${evo}</div><div class="hint">지금까지 운동: ${tr}</div><div class="hint">🔥 연속 기록 ${dayStreak(S, t)}일 (퀘스트 1개 이상, 또는 운동 + 끼니 인증한 날 · 휴식일·휴식권은 안 끊겨요)</div>`;
   $('stats').innerHTML = STAT_KEYS.map(k => { const g = p.stats[k] - p.base[k]; return `<div class="stat"><b>${p.stats[k]}</b><span>${STAT_NAMES[k]}</span>${g > 0 ? `<em>+${g}</em>` : ''}</div>`; }).join('');
   // 오늘
   const T = S.logs[t], m = exMinutes(T), grp = dayGroups(T);
@@ -378,7 +456,9 @@ function frame(t) {
   let pet, preview = false;
   if (S) pet = S.pet;
   else { const st = statsFromInputs(formInputs()); pet = { line: lineFromStats(st), xp: 0, hp: RULES.startHp, height: st.height }; preview = true; }
-  draw(ctx, pet, t, { preview, cheer: performance.now() < cheerUntil, resting: !!S && !!restPassOn(S, today()) });
+  const opts = { preview, cheer: performance.now() < cheerUntil, resting: !!S && !!restPassOn(S, today()), wear: S ? wearLook(S) : {} };
+  draw(ctx, pet, t, opts);
+  if (S && !$('shopPanel').hidden) draw(shopCtx, pet, t, opts); // 꾸미기 화면 미리보기
 }
 if (matchMedia('(prefers-reduced-motion: reduce)').matches) setInterval(() => frame(performance.now()), 500);
 else { const loop = t => { frame(t); requestAnimationFrame(loop); }; requestAnimationFrame(loop); }
@@ -415,6 +495,9 @@ $('bCreate').onclick = () => {
 $('bSetupCancel').onclick = () => { $('setup').hidden = true; openPanel('infoPanel'); };
 $('bRemeasure').onclick = () => openSetup('remeasure');
 $('questPhoto').onchange = onQuestPhoto;
+$('kDex').onclick = () => openPanel('dexPanel');
+$('kShop').onclick = () => openPanel('shopPanel');
+$('annOk').onclick = () => { $('annModal').hidden = true; showAnniversary(); }; // 남은 기념일이 있으면 이어서
 $('bRestart').onclick = () => { if (confirm('지금 튼튼몬의 기록이 모두 사라져요. 정말 다시 시작할까요?')) { closePanels(); restart(); } };
 $('bNext').onclick = () => {
   S.offset++; const n = evaluate(S, today()); save(); render();
@@ -430,6 +513,9 @@ $('bResetNo').onclick = () => { $('resetConfirm').hidden = true; $('demo').hidde
 $('bResetYes').onclick = () => { $('resetConfirm').hidden = true; restart(); };
 
 if (S) { const n = evaluate(S, today()); save(); if (n.length) toast(`없던 동안: ${n.join(', ')}`); }
+const hello = S && greeting(S, today(), new Date().getHours()); // 그날 첫 접속 인사 (오래 안 왔으면 반겨 주기)
+if (S) save();
 $('setup').hidden = !!S;
 render();
+if (hello && !S.pet.sleeping) sayLine(hello);
 setInterval(() => { if (S && S.lastEval < today()) { evaluate(S, today()); save(); render(); } }, 60000);

@@ -1,7 +1,7 @@
 # 튼튼몬 키우기 — 기획서 (Claude Code용)
 
 고등학생이 운동·식단 습관을 기르도록 돕는 다마고치식 육성 게임. 만든 사람: 체육교사 (브랜드 DEOK TT).
-현재 상태: **1단계 끝 · 1.5단계(계통 캐릭터 · 자세한 인증 규칙) (2026-10-13) · 고도화 Phase 1(잠듦 · 휴식권) · Phase 2(오늘의 퀘스트 · 코인) (2026-10-22)** — 고도화 지시서는 `TUNTUN_PLAN.md` — Vite 로 옮겨 파일을 나눔(바닐라 JS, 캔버스 픽셀 그림, localStorage 저장). 테스트(vitest)·PWA(홈 화면 설치·오프라인) 있음.
+현재 상태: **1단계 끝 · 1.5단계(계통 캐릭터 · 자세한 인증 규칙) (2026-10-13) · 고도화 Phase 1(잠듦 · 휴식권) · Phase 2(오늘의 퀘스트 · 코인) · Phase 3(도감 · 꾸미기 · 대사 · 기념일) (2026-10-22)** — 고도화 지시서는 `TUNTUN_PLAN.md` — Vite 로 옮겨 파일을 나눔(바닐라 JS, 캔버스 픽셀 그림, localStorage 저장). 테스트(vitest)·PWA(홈 화면 설치·오프라인) 있음.
 
 ### 파일
 | 파일 | 하는 일 |
@@ -10,6 +10,9 @@
 | `src/game.js` | **게임 계산만** (단계·인증·하루 정산·능력치·잠듦·휴식권). 화면·저장 코드 없음. 기존 규칙 숫자는 `RULES` 한 곳 |
 | `src/config/game.js` | 고도화로 새로 넣는 숫자(깨어날 때 체력, 휴식권 횟수, 퀘스트 코인 등) |
 | `src/config/quests.js` | 오늘의 퀘스트 목록 (선생님이 직접 더하고 고치는 곳) |
+| `src/config/items.js` | 꾸미기 아이템 (모자·소품·배경·운동복, 기념일 한정) |
+| `src/config/dialogues.js` | 상황별 튼튼몬 대사·표정 |
+| `src/config/dex.js` | 도감 설명 (나중에 합체 진화 쪽 추가) |
 | `src/draw.js` | 픽셀 튼튼몬 그림 (계통 × 단계, 자동 테두리) |
 | `dev/sprites.html` | 그림 모음 미리보기 (개발용) |
 | `src/main.js` | 버튼 연결·화면 그리기 |
@@ -86,12 +89,22 @@
 - 인증: 원탭 `tap` +1 · 사진 `photo` +3 (`QUEST_COIN`, 퀘스트에 `coin` 이 있으면 그 값). 버튼 하나 = 인증 하나.
   사진은 `capture="environment"` 로 카메라를 열고, 미리보기 1.5초 뒤 버림. **찍은 시각만 저장**.
 - 3개 모두 하면 보너스 `DAILY_ALL_CLEAR_BONUS`(3), 하루 한 번. 끝내면 튼튼몬이 1.8초 기뻐함(점프·하트).
-- 퀘스트 연속 기록: 1개 이상 한 날이 이어진 수. 주 1회 휴식일·휴식권 날은 끊지 않고 건너뜀.
+- **연속 기록(화면에 보이는 것 하나로 합침, `dayStreak`)**: 퀘스트 1개 이상 했거나 운동(또는 휴식일)+끼니 인증한 날이 이어진 수.
+  주 1회 휴식일·휴식권 날은 끊지 않고 건너뜀. 확실한 인증만 세는 예전 `streak()` 은 Phase 5 노력 랭킹용으로 남겨 둠(화면엔 안 씀).
 - 체중 감량·굶기·식사량 줄이기·외모 퀘스트는 넣지 않음 (테스트가 막음).
 
-## 3. 저장 구조 (localStorage `tteuntteunmon.v1` · 안의 `v:4`)
+### 2-6. 도감 · 꾸미기 · 감정 표현 · 기념일 (Phase 3)
+- 도감: 단계 6 × 계통 5 = 30칸. 한 번이라도 된 모습은 컬러, 아니면 실루엣. 자랄 때 거쳐 온 단계를 모두 적음(어른부터는 갈래 계통). 칸을 누르면 설명.
+  `dexEntries()` 는 `page` 를 가져서 Phase 4 합체 진화 혼합종 쪽을 더할 수 있음.
+- 꾸미기: 코인으로 사서(두 번 눌러 확인) 보관함에, 갈래(모자·소품·배경·운동복)마다 하나씩 쓰기·벗기. 모자·소품은 이모지를 머리 위·옆에 얹고, 배경·운동복은 색만 바꿈.
+  **체형을 바꾸는 아이템 없음**, 경험치·체력과 무관.
+- 대사(`dialogues.js`): 아침 첫 접속 · 그날 첫 접속 · 3일(`COMEBACK_DAYS`) 만에 접속(반겨 주기) · 깨어남 · 균형식 · 무지개 · 60분 · 실내 운동 · 체력 낮음 · 퀘스트 모두 완료. 같은 상황에서 무작위(체력 낮음은 하루 동안 같은 대사).
+- 기념일: DAY `ANNIVERSARY_DAYS`(7·30·50·100) + 연속 기록 `STREAK_ANNIVERSARY_DAYS`(7·30). 지난 것도 늦게 챙김. 축하 창 + 한정 꾸미기(`ANNIVERSARY_GIFTS`).
+  확인 방법: 체험용 "하루 넘기기" 로 DAY 를 넘김.
+
+## 3. 저장 구조 (localStorage `tteuntteunmon.v1` · 안의 `v:5`)
 ```
-{ v:4, offset, coins, lastEval:'YYYY-MM-DD', rest:{주시작일:쓴날}, weeks:{주시작일:{hard,strength,flex,minutes,rainbow,done[],xp}},
+{ v:5, offset, coins, dex:['단계-계통'], items:{ owned:[id], wear:{hat,prop,bg,outfit} }, anniv:{ day7:'YYYY-MM-DD', streak7:… }, lastOpen, lastEval:'YYYY-MM-DD', rest:{주시작일:쓴날}, weeks:{주시작일:{hard,strength,flex,minutes,rainbow,done[],xp}},
   passes:{ exam:[{start,end}], sick:['YYYY-MM-DD'] },
   pet:{ name, line, branch, height, stats:{cardio,strength,flex,power}, base:{…}, train:{…분}, hp, xp, sleeping, born },
   logs:{ 'YYYY-MM-DD': { status:'ex'|'rest'|'pass'|'sleep'|'miss', bonus:{goalPlus,variety,rainbow},
@@ -102,6 +115,7 @@
 - 예전 `v:1` 저장은 불러올 때 `migrate()` 가 옮김 (경험치는 같은 단계가 되게 늘림, 계통은 그때 능력치로).
 - `v:2` → `v:3`: 소멸(`alive:false`)은 잠듦(`sleeping:true`, 체력 0)으로, `diedOn` 은 지우고 `passes` 칸 추가.
 - `v:3` → `v:4`: `coins:0` 추가.
+- `v:4` → `v:5`: 도감을 지금까지 거쳐 온 모습으로 채우고, `items`·`anniv`·`lastOpen` 추가.
 - 사진은 200px JPEG(dataURL)로 줄여 저장한다.
 - 그림 확인: `npm run dev` → `/dev/sprites.html` (단계 × 계통 모음 · `?hp=20` 지친 모습 · `?cheer` 기쁜 모습 · 맨 아래 잠듦·휴식권·체력 20 비교 줄). 배포에는 안 들어감.
 

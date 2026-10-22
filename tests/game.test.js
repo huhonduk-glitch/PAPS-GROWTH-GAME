@@ -4,10 +4,14 @@ import {
   newPet, newState, evaluate, certExercise, certMeal, checkPlausible, weekCounts, streak, remeasure,
   migrate, migrateXp, addDay, daysBetween, weekId, todayKey, toMin,
   termOf, passesLeft, useSickPass, useExamPass, cancelExamPass, restPassOn,
-  SAVE_VERSION, questOf, questCoin, pickQuests, todayQuests, completeQuest, questStreak,
+  SAVE_VERSION, questOf, questCoin, pickQuests, todayQuests, completeQuest, dayStreak,
+  dexEntries, buyItem, wearItem, takeOff, wearLook, itemOf, pendingAnniversaries, celebrate, pickLine, dayRnd, greeting,
 } from '../src/game.js';
+import { ITEMS, ITEM_CATEGORIES } from '../src/config/items.js';
+import { DIALOGUES } from '../src/config/dialogues.js';
 import {
   EXAM_REST_MAX_DAYS, EXAM_REST_PER_TERM, SICK_REST_PER_MONTH, QUESTS_PER_DAY, QUEST_COIN, DAILY_ALL_CLEAR_BONUS,
+  ANNIVERSARY_DAYS, ANNIVERSARY_GIFTS,
 } from '../src/config/game.js';
 import { QUESTS, QUEST_CATEGORIES } from '../src/config/quests.js';
 import { load, save, clear, KEY } from '../src/storage.js';
@@ -456,15 +460,15 @@ describe('오늘의 퀘스트 · 코인', () => {
     expect(S.pet.sleeping).toBe(true);
     expect(S.coins).toBeGreaterThan(0);
   });
-  it('퀘스트 연속 기록: 이어지면 늘고, 빈 날이면 끊김', () => {
+  it('연속 기록(합침): 이어지면 늘고, 빈 날이면 끊김', () => {
     const S = base();
     finishAll(S, D0); finishAll(S, addDay(D0, 1));
-    expect(questStreak(S, addDay(D0, 1))).toBe(2);
+    expect(dayStreak(S, addDay(D0, 1))).toBe(2);
     S.rest[weekId(D0)] = D0; // 주 1회 휴식일은 이미 씀
     evaluate(S, addDay(D0, 4));
-    expect(questStreak(S, addDay(D0, 4))).toBe(0);
+    expect(dayStreak(S, addDay(D0, 4))).toBe(0);
   });
-  it('주 1회 휴식일 · 휴식권 날은 퀘스트 연속 기록을 끊지 않음', () => {
+  it('주 1회 휴식일 · 휴식권 날은 연속 기록(합침)을 끊지 않음', () => {
     const S = base();
     finishAll(S, D0); ex(S, D0, 20);         // 월: 운동도 해서 휴식일 안 씀
     useSickPass(S, addDay(D0, 1));           // 화: 휴식권
@@ -472,9 +476,133 @@ describe('오늘의 퀘스트 · 코인', () => {
     finishAll(S, addDay(D0, 3));             // 목
     evaluate(S, addDay(D0, 4));
     expect(S.logs[addDay(D0, 2)].status).toBe('rest');
-    expect(questStreak(S, addDay(D0, 4))).toBe(2);
+    expect(dayStreak(S, addDay(D0, 4))).toBe(2);
     finishAll(S, addDay(D0, 4));
-    expect(questStreak(S, addDay(D0, 4))).toBe(3);
+    expect(dayStreak(S, addDay(D0, 4))).toBe(3);
+  });
+});
+
+describe('연속 기록(합침): 퀘스트 또는 운동+끼니', () => {
+  it('퀘스트 없이 운동+끼니만 한 날도 이어짐, 섞여도 이어짐', () => {
+    const S = base();
+    ex(S, D0, 20); meal(S, D0, '점심', BAL);                         // 운동+끼니
+    const Q = todayQuests(S, addDay(D0, 1)); completeQuest(S, addDay(D0, 1), Q.ids[0], questOf(Q.ids[0]).verify); // 퀘스트만
+    evaluate(S, addDay(D0, 2));
+    expect(dayStreak(S, addDay(D0, 2))).toBe(2);
+    expect(streak(S, addDay(D0, 2))).toBe(0); // 확실한 인증만 세는 기존 기록(랭킹용)은 따로
+  });
+});
+
+describe('도감', () => {
+  it('단계 × 계통 30칸, 설명 있음', () => {
+    const E = dexEntries();
+    expect(E.length).toBe(30);
+    expect(new Set(E.map(e => e.key)).size).toBe(30);
+    E.forEach(e => expect(e.desc.length).toBeGreaterThan(3));
+    expect(E.find(e => e.key === '4-wind')).toMatchObject({ name: '하늘몬', desc: '바람 계통 어른 — 오래 달려도 지치지 않아요' });
+  });
+  it('새 튼튼몬은 알만 · 자라면 거쳐 온 단계가 모두 적힘 (건너뛴 단계 포함)', () => {
+    const S = base();
+    expect(S.dex).toEqual([`0-${S.pet.line}`]);
+    S.pet.xp = 110; ex(S, D0, 30); // 아기를 건너뛰고 꼬마로
+    expect(S.dex).toEqual(['0', '1', '2'].map(i => `${i}-${S.pet.line}`));
+  });
+  it('어른부터는 갈래 계통으로 적힘', () => {
+    const S = base({ cardio: 1, strength: 5, flex: 5, power: 5 }); // 바람
+    S.pet.train = { cardio: 0, strength: 0, flex: 300, power: 0 };
+    S.pet.xp = 895; ex(S, D0, 30);
+    expect(S.pet.branch).toBe('flower');
+    expect(S.dex).toContain('3-wind');
+    expect(S.dex).toContain('4-flower');
+  });
+});
+
+describe('꾸미기', () => {
+  it('목록: id 겹침 없음, 갈래 올바름, 한정은 값이 없음, 배경·운동복은 색이 있음', () => {
+    expect(new Set(ITEMS.map(i => i.id)).size).toBe(ITEMS.length);
+    ITEMS.forEach(i => {
+      expect(Object.keys(ITEM_CATEGORIES)).toContain(i.category);
+      if (i.limited) expect(i.price).toBeNull(); else expect(i.price).toBeGreaterThan(0);
+      if (i.category === 'bg' || i.category === 'outfit') expect(i.color).toHaveLength(3);
+    });
+    Object.keys(ITEM_CATEGORIES).forEach(c => expect(ITEMS.filter(i => i.category === c && !i.limited).length).toBeGreaterThanOrEqual(4));
+  });
+  it('건강 원칙: 체형을 바꾸는 아이템 없음', () => {
+    ITEMS.forEach(i => expect(i.name).not.toMatch(/살|다이어트|근육|날씬|뚱뚱|마른|체형|몸매|체중/));
+  });
+  it('코인으로 사기 · 모자라면 못 삼 · 두 번 못 삼 · 한정은 못 삼', () => {
+    const S = base(); S.coins = 6;
+    expect(buyItem(S, 'hat_grad').reason).toBe('coins');
+    expect(buyItem(S, 'hat_cap')).toEqual({ ok: true });
+    expect(S.coins).toBe(1);
+    expect(buyItem(S, 'hat_cap').reason).toBe('owned');
+    S.coins = 100;
+    expect(buyItem(S, 'hat_ribbon').reason).toBe('limited');
+    expect(buyItem(S, 'nope').reason).toBe('unknown');
+  });
+  it('쓰기는 산 것만, 갈래마다 하나, 벗기 · 그림 정보', () => {
+    const S = base(); S.coins = 50;
+    expect(wearItem(S, 'hat_cap')).toBe(false);
+    buyItem(S, 'hat_cap'); buyItem(S, 'hat_straw'); buyItem(S, 'bg_sky');
+    wearItem(S, 'hat_cap'); wearItem(S, 'hat_straw'); wearItem(S, 'bg_sky');
+    expect(S.items.wear).toEqual({ hat: 'hat_straw', bg: 'bg_sky' });
+    expect(wearLook(S)).toMatchObject({ hat: '👒', bg: [178, 214, 238] });
+    takeOff(S, 'hat');
+    expect(wearLook(S).hat).toBeFalsy();
+  });
+  it('꾸미기는 경험치·체력·능력치를 바꾸지 않음', () => {
+    const S = base(); S.coins = 50; const pet = JSON.stringify(S.pet);
+    buyItem(S, 'outfit_red'); wearItem(S, 'outfit_red');
+    expect(JSON.stringify(S.pet)).toBe(pet);
+  });
+});
+
+describe('기념일', () => {
+  it(`DAY ${ANNIVERSARY_DAYS.join('·')} 기념일 — 지나간 것도 늦게 챙김, 한 번만`, () => {
+    const S = base();
+    expect(pendingAnniversaries(S, addDay(D0, 5))).toEqual([]);
+    const p = pendingAnniversaries(S, addDay(D0, 6)); // DAY 7
+    expect(p.map(a => a.id)).toEqual(['day7']);
+    expect(celebrate(S, addDay(D0, 6), p[0])).toBe(true);
+    expect(celebrate(S, addDay(D0, 6), p[0])).toBe(false);
+    expect(S.items.owned).toContain(ANNIVERSARY_GIFTS.day[7]);
+    expect(pendingAnniversaries(S, addDay(D0, 40)).map(a => a.id)).toEqual(['day30']);
+  });
+  it('연속 기록 7일 기념일 → 한정 꾸미기', () => {
+    const S = base();
+    for (let i = 0; i < 7; i++) { const Q = todayQuests(S, addDay(D0, i)); completeQuest(S, addDay(D0, i), Q.ids[0], questOf(Q.ids[0]).verify); }
+    evaluate(S, addDay(D0, 6));
+    const p = pendingAnniversaries(S, addDay(D0, 6));
+    expect(p.map(a => a.id)).toEqual(['day7', 'streak7']);
+    p.forEach(a => celebrate(S, addDay(D0, 6), a));
+    expect(S.items.owned).toEqual(expect.arrayContaining([ANNIVERSARY_GIFTS.day[7], ANNIVERSARY_GIFTS.streak[7]]));
+    expect(wearItem(S, ANNIVERSARY_GIFTS.streak[7])).toBe(true);
+  });
+  it('기념일 선물은 모두 아이템 목록의 한정 아이템', () => {
+    [...Object.values(ANNIVERSARY_GIFTS.day), ...Object.values(ANNIVERSARY_GIFTS.streak)].forEach(id => expect(itemOf(id)).toMatchObject({ limited: true }));
+  });
+});
+
+describe('감정 표현', () => {
+  it('상황마다 대사 2개 이상, 표정은 cheer/normal', () => {
+    ['morning', 'balanced_meal', 'rainbow', 'ex_60', 'comeback', 'low_hp', 'indoor_ex'].forEach(k => expect(DIALOGUES[k].lines.length).toBeGreaterThanOrEqual(2));
+    Object.values(DIALOGUES).forEach(D => expect(['cheer', 'normal']).toContain(D.face));
+  });
+  it('건강 원칙: 몸무게·체형·외모·굶기 말 없음', () => {
+    Object.values(DIALOGUES).flatMap(D => D.lines).forEach(t => expect(t).not.toMatch(/다이어트|체중|몸무게|칼로리|굶|덜 먹|살 ?빼|날씬|뚱뚱|몸매|외모|일째 잠/));
+  });
+  it('여러 대사 중 무작위 · 같은 날은 같은 대사', () => {
+    expect(pickLine('rainbow', () => 0).text).toBe(DIALOGUES.rainbow.lines[0]);
+    expect(pickLine('rainbow', () => 0.99).text).toBe(DIALOGUES.rainbow.lines.at(-1));
+    expect(pickLine('low_hp', dayRnd(D0)).text).toBe(pickLine('low_hp', dayRnd(D0)).text);
+    expect(pickLine('없는 상황')).toBeNull();
+  });
+  it('인사: 아침 첫 접속 · 그날 두 번째는 없음 · 3일 만이면 반겨 주기', () => {
+    const S = base(); S.lastOpen = null;
+    expect(greeting(S, D0, 8)).toBe('morning');
+    expect(greeting(S, D0, 9)).toBeNull();
+    expect(greeting(S, addDay(D0, 1), 15)).toBe('hello');
+    expect(greeting(S, addDay(D0, 4), 8)).toBe('comeback');
   });
 });
 
@@ -538,7 +666,12 @@ describe('예전 저장(v1) 옮기기', () => {
   });
   it('v3 → v4: 코인 칸 추가, 나머지 그대로', () => {
     const S = migrate({ v: 3, lastEval: D0, logs: {}, rest: {}, passes: { exam: [], sick: [D0] }, pet: { hp: 40, xp: 10, sleeping: false } });
-    expect(S).toMatchObject({ v: 4, coins: 0, passes: { sick: [D0] } });
+    expect(S).toMatchObject({ coins: 0, passes: { sick: [D0] } });
+  });
+  it('v4 → v5: 도감은 지금까지 거쳐 온 모습으로 채움, 코인 그대로', () => {
+    const S = migrate({ v: 4, coins: 7, lastEval: D0, logs: {}, rest: {}, passes: { exam: [], sick: [] }, pet: { line: 'rock', branch: 'spark', xp: 1000, hp: 50, sleeping: false, born: D0 } });
+    expect(S).toMatchObject({ v: 5, coins: 7, items: { owned: [], wear: {} }, anniv: {} });
+    expect(S.dex).toEqual(['0-rock', '1-rock', '2-rock', '3-rock', '4-spark']);
   });
   it('모르는 버전은 버림', () => {
     expect(migrate({ v: 9, pet: {} })).toBeNull();

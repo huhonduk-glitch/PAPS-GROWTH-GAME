@@ -78,6 +78,29 @@ input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid
 .qc{font-family:var(--f-px);font-size:.62rem;opacity:.8}
 .qok{flex:none;font-size:.8rem;color:var(--ok);white-space:nowrap}
 #questPrev{max-height:120px;object-fit:cover}
+.subkeys{display:flex;gap:10px;margin-top:-6px}
+.subkeys .btn{flex:1;min-height:48px;background:var(--card)}
+.dexgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.dexcell{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 2px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font:inherit;font-size:.66rem;color:var(--ink);cursor:pointer;min-width:0}
+.dexcell canvas{width:100%;image-rendering:pixelated;border-radius:6px}
+.dexcell span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.dexcell.unmet span{color:var(--ink-2)}
+.dexcell.on{outline:2px solid var(--ink)}
+.shopcv{width:144px;align-self:center;image-rendering:pixelated;border-radius:12px}
+.shoplist{display:flex;flex-direction:column;gap:8px}
+.shopi{display:flex;align-items:center;gap:10px;background:var(--bg);border-radius:12px;padding:8px 10px;min-height:56px}
+.shopi.on{outline:2px solid var(--ok)}
+.swatch{flex:none;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-size:1.3rem;background:var(--card)}
+.sname{flex:1;font-size:.95rem}
+.sname em{font-style:normal;font-size:.74rem;color:var(--ink-2);margin-left:4px}
+.shopi .btn{flex:none;min-height:44px;min-width:76px}
+.modal{position:fixed;inset:0;background:rgba(20,26,33,.55);display:grid;place-items:center;padding:16px;z-index:10}
+.modal[hidden]{display:none}
+.ann{max-width:360px;text-align:center;align-items:center}
+.ann p{margin:0}
+.annfx{font-size:3rem;animation:pop .6s ease-out}
+@keyframes pop{0%{transform:scale(.3)}70%{transform:scale(1.2)}100%{transform:scale(1)}}
+@media (prefers-reduced-motion: reduce){.annfx{animation:none}}
 .btn.danger{color:var(--warn);border-color:var(--warn);margin-top:6px}
 .booked{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:.88rem}
 .booked .btn{min-height:40px}
