@@ -110,10 +110,10 @@ function onCertEx() {
   if (r.woke) welcome();
   else if (r.grew) grewSay();
   else if (r.counted === 0) say(`오늘은 ${RULES.exDailyCap}분을 다 채웠어요. 이제 푹 쉬어요.`);
-  else if (r.flag) say(`${sel.ex} ${r.min}분 인증! 경험치 +${r.gain} (확인 필요)`);
+  else if (r.flag) say(`${sel.ex} ${r.min}분 인증했어요! 경험치 +${r.gain} (확인 필요)`);
   else if (r.parts.includes(`하루 ${RULES.exGoalPlus}분`)) sayLine('ex_60', ` 경험치 +${r.gain}`);
   else if (INDOOR_KINDS.includes(sel.ex)) sayLine('indoor_ex', ` 경험치 +${r.gain}`);
-  else say(`${sel.ex} ${r.min}분 인증! 경험치 +${r.gain}`);
+  else say(`${sel.ex} ${r.min}분 인증했어요! 경험치 +${r.gain}`);
   photos.ex = null; $('exPrev').hidden = true; $('exPhoto').value = '';
 }
 let startTouched = false;
@@ -149,7 +149,7 @@ function onCertMeal() {
   else if (r.grew) grewSay();
   else if (r.rainbow) sayLine('rainbow', ` +${r.gain}`);
   else if (r.tier !== 'plain') sayLine('balanced_meal', ` 경험치 +${r.gain}`);
-  else say(`${sel.slot} 인증! 다음엔 한 가지 더 곁들여 봐요. +${r.gain}`);
+  else say(`${sel.slot} 인증했어요! 다음엔 한 가지 더 곁들여 봐요. +${r.gain}`);
   photos.meal = null; $('mealPrev').hidden = true; $('mealPhoto').value = '';
 }
 function slotByTime() {
@@ -217,14 +217,14 @@ function grewSay() { say(`${S.pet.name}(이)가 ${speciesName(S.pet)}(으)로 �
 function moodLine() {
   const p = S.pet; const L = S.logs[today()];
   if (p.sleeping) return `쿨쿨… ${p.name}(이)가 자고 있어요. 운동 한 번이면 깨어나요! (간식 말고 끼니 인증도 좋아요)`;
-  if (restPassOn(S, today())) return `푹 쉬고 와요. 오늘은 체력이 줄지 않아요.`;
+  if (restPassOn(S, today())) return `${pickLine('resting', dayRnd(today())).text} (오늘은 체력이 줄지 않아요)`; // 하루 동안 같은 대사
   if (p.hp <= LOW_HP_WARN) return pickLine('low_hp', dayRnd(today())).text; // 하루 동안 같은 대사
   if (p.hp < 25) return '너무 힘이 없어요… 오늘 꼭 움직이고 잘 챙겨 먹어 주세요.';
   if (p.hp < 50) return `조금 시들시들해요. 운동 ${RULES.exGoal}분이면 기운이 나요.`;
   const ex = exMinutes(L), meals = L ? L.meals.length : 0;
-  if (ex >= RULES.exGoalPlus && dayGroups(L).size === GROUP_KEYS.length) return '오늘 최고예요! 60분 운동에 무지개 식단까지!';
+  if (ex >= RULES.exGoalPlus && dayGroups(L).size === GROUP_KEYS.length) return '오늘 최고예요! 60분 운동에 무지개 식단까지 해냈어요!';
   if (ex >= RULES.exGoal && meals >= 2) return `오늘 잘 하고 있어요! ${ex < RULES.exGoalPlus ? `60분까지 ${RULES.exGoalPlus - ex}분 남았어요.` : ''}`;
-  if (ex < RULES.exGoal) return `오늘 운동 ${ex}분. ${RULES.exGoal}분 채우면 체력이 지켜져요.`;
+  if (ex < RULES.exGoal) return `오늘 운동 ${ex}분이에요. ${RULES.exGoal}분 채우면 체력이 지켜져요.`;
   return '운동 좋았어요! 끼니도 인증해 주세요.';
 }
 function render() {
@@ -289,7 +289,7 @@ function renderShop() {
     const r = buyItem(S, b.dataset.buy);
     if (!r.ok) { toast(BUY_FAIL[r.reason]); renderShop(); return; }
     wearItem(S, b.dataset.buy); save(); renderShop(); renderQuests();
-    say(`${itemOf(b.dataset.buy).name}! 잘 어울려요.`, true);
+    say(`${itemOf(b.dataset.buy).name}, 잘 어울려요!`, true);
   }));
   $('shopList').querySelectorAll('[data-wear]').forEach(b => b.onclick = () => { wearItem(S, b.dataset.wear); save(); renderShop(); });
   $('shopList').querySelectorAll('[data-off]').forEach(b => b.onclick = () => { takeOff(S, b.dataset.off); save(); renderShop(); });
@@ -336,7 +336,7 @@ function finishQuest(id, verify) {
   if (!r.ok) { renderQuests(); return; }
   save(); renderQuests();
   if (r.allClear) { say(`${pickLine('quest_clear').text} 보너스 코인 +${r.bonus}`, QUEST_CHEER_MS); toast(`🎉 오늘 퀘스트를 다 했어요! 코인 +${r.coin + r.bonus}`); }
-  else say(`퀘스트 완료! 코인 +${r.coin}`, QUEST_CHEER_MS);
+  else say(`${pickLine('quest_one').text} 코인 +${r.coin}`, QUEST_CHEER_MS);
 }
 /** 사진 퀘스트: 사진은 저장하지 않는다 — 잠깐 미리보기만 보여주고 버리고, 끝낸 시각만 남김 */
 function onQuestPhoto(e) {

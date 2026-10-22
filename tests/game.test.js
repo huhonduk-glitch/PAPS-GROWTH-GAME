@@ -500,7 +500,9 @@ describe('도감', () => {
     expect(E.length).toBe(30);
     expect(new Set(E.map(e => e.key)).size).toBe(30);
     E.forEach(e => expect(e.desc.length).toBeGreaterThan(3));
-    expect(E.find(e => e.key === '4-wind')).toMatchObject({ name: '하늘몬', desc: '바람 계통 어른 — 오래 달려도 지치지 않아요' });
+    expect(E.find(e => e.key === '4-wind')).toMatchObject({ name: '하늘몬', desc: '바람 계통 어른 — 바람처럼 멀리 달려요' });
+    expect(new Set(E.map(e => e.desc.split(' — ')[1])).size).toBe(30); // 칸마다 설명이 다름
+    E.forEach(e => expect(e.desc).not.toMatch(/날씬|뚱뚱|몸매|외모|예쁘|잘생|키가|살/));
   });
   it('새 튼튼몬은 알만 · 자라면 거쳐 온 단계가 모두 적힘 (건너뛴 단계 포함)', () => {
     const S = base();
@@ -532,17 +534,17 @@ describe('꾸미기', () => {
     ITEMS.forEach(i => expect(i.name).not.toMatch(/살|다이어트|근육|날씬|뚱뚱|마른|체형|몸매|체중/));
   });
   it('코인으로 사기 · 모자라면 못 삼 · 두 번 못 삼 · 한정은 못 삼', () => {
-    const S = base(); S.coins = 6;
+    const S = base(); S.coins = 16;
     expect(buyItem(S, 'hat_grad').reason).toBe('coins');
     expect(buyItem(S, 'hat_cap')).toEqual({ ok: true });
-    expect(S.coins).toBe(1);
+    expect(S.coins).toBe(16 - itemOf('hat_cap').price);
     expect(buyItem(S, 'hat_cap').reason).toBe('owned');
     S.coins = 100;
     expect(buyItem(S, 'hat_ribbon').reason).toBe('limited');
     expect(buyItem(S, 'nope').reason).toBe('unknown');
   });
   it('쓰기는 산 것만, 갈래마다 하나, 벗기 · 그림 정보', () => {
-    const S = base(); S.coins = 50;
+    const S = base(); S.coins = 100;
     expect(wearItem(S, 'hat_cap')).toBe(false);
     buyItem(S, 'hat_cap'); buyItem(S, 'hat_straw'); buyItem(S, 'bg_sky');
     wearItem(S, 'hat_cap'); wearItem(S, 'hat_straw'); wearItem(S, 'bg_sky');
@@ -607,11 +609,15 @@ describe('기념일', () => {
 
 describe('감정 표현', () => {
   it('상황마다 대사 2개 이상, 표정은 cheer/normal', () => {
-    ['morning', 'balanced_meal', 'rainbow', 'ex_60', 'comeback', 'low_hp', 'indoor_ex'].forEach(k => expect(DIALOGUES[k].lines.length).toBeGreaterThanOrEqual(2));
+    ['morning', 'late_night', 'resting', 'quest_one', 'balanced_meal', 'rainbow', 'ex_60', 'comeback', 'low_hp', 'indoor_ex'].forEach(k => expect(DIALOGUES[k].lines.length).toBeGreaterThanOrEqual(2));
     Object.values(DIALOGUES).forEach(D => expect(['cheer', 'normal']).toContain(D.face));
   });
   it('건강 원칙: 몸무게·체형·외모·굶기 말 없음', () => {
     Object.values(DIALOGUES).flatMap(D => D.lines).forEach(t => expect(t).not.toMatch(/다이어트|체중|몸무게|칼로리|굶|덜 먹|살 ?빼|날씬|뚱뚱|몸매|외모|일째 잠/));
+  });
+  it('말투: 모든 문장이 "~요" 로 끝남', () => {
+    Object.values(DIALOGUES).flatMap(D => D.lines).forEach(t => t.split(/[.!?…]+/).map(x => x.trim()).filter(Boolean)
+      .forEach(sentence => expect(sentence, t).toMatch(/요$/)));
   });
   it('여러 대사 중 무작위 · 같은 날은 같은 대사', () => {
     expect(pickLine('rainbow', () => 0).text).toBe(DIALOGUES.rainbow.lines[0]);
@@ -625,6 +631,8 @@ describe('감정 표현', () => {
     expect(greeting(S, D0, 9)).toBeNull();
     expect(greeting(S, addDay(D0, 1), 15)).toBe('hello');
     expect(greeting(S, addDay(D0, 4), 8)).toBe('comeback');
+    expect(greeting(S, addDay(D0, 5), 2)).toBe('late_night');
+    expect(greeting(S, addDay(D0, 6), 5)).toBe('morning');
   });
 });
 

@@ -17,11 +17,11 @@ export const DAILY_ALL_CLEAR_BONUS = 3;   // 하루 퀘스트를 모두 끝내�
 export const QUEST_CHEER_MS = 1800;       // 퀘스트 끝냈을 때 튼튼몬이 기뻐하는 시간(ms)
 
 /* ---------- Phase 3. 도감 · 꾸미기 · 감정 표현 · 기념일 ---------- */
-export const ANNIVERSARY_DAYS = [7, 30, 50, 100];   // 알 받은 날을 1일로 셈 (DAY 숫자)
+export const ANNIVERSARY_DAYS = [7, 30, 50, 100, 150]; // 알 받은 날을 1일로 셈 (DAY 숫자)
 export const STREAK_ANNIVERSARY_DAYS = [7, 30];     // 연속 기록 기념일
 /** 기념일 한정 꾸미기 (config/items.js 의 limited 아이템 id) */
 export const ANNIVERSARY_GIFTS = {
-  day: { 7: 'hat_ribbon', 30: 'prop_trophy', 50: 'bg_gold', 100: 'prop_cake' },
+  day: { 7: 'hat_ribbon', 30: 'prop_trophy', 50: 'bg_gold', 100: 'prop_cake', 150: 'prop_medal' },
   streak: { 7: 'outfit_gold', 30: 'hat_star' },
 };
 export const COMEBACK_DAYS = 3;           // 이만큼 안 왔다가 오면 "다시 만나서 반가워" 대사

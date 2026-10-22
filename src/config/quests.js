@@ -14,6 +14,7 @@ export const QUESTS = [
   { id: 'squat_20', title: '스쿼트 20번', category: 'exercise', verify: 'tap' },
   { id: 'plank_30s', title: '플랭크 30초 버티기', category: 'exercise', verify: 'tap' },
   { id: 'exercise_place', title: '오늘 운동한 곳 사진 찍기', category: 'exercise', verify: 'photo' },
+  { id: 'lunch_walk', title: '점심시간에 운동장이나 복도 10분 걷기', category: 'exercise', verify: 'tap' },
   // 식단
   { id: 'breakfast', title: '아침 챙겨 먹기', category: 'diet', verify: 'tap' },
   { id: 'veggie_lunch', title: '점심에 채소 먹기', category: 'diet', verify: 'photo' },
@@ -23,9 +24,10 @@ export const QUESTS = [
   { id: 'colorful_plate', title: '여러 색 반찬이 있는 한 끼 찍기', category: 'diet', verify: 'photo' },
   // 생활
   { id: 'water_1', title: '물 한 컵 마시기', category: 'health', verify: 'tap' },
-  { id: 'phone_down', title: '자기 전 30분 휴대폰 내려놓기', category: 'health', verify: 'tap' },
-  { id: 'stand_up', title: '공부하다 한 시간마다 일어나 몸 펴기', category: 'health', verify: 'tap' },
+  { id: 'phone_down', title: '어젯밤 자기 전 30분 휴대폰 내려놓았어요', category: 'health', verify: 'tap' },
+  { id: 'stand_up', title: '공부하다 일어나 몸 펴기 3번', category: 'health', verify: 'tap' },
   { id: 'sunlight', title: '햇볕 쬐며 5분 쉬기', category: 'health', verify: 'tap' },
-  { id: 'brush_teeth', title: '하루 세 번 양치하기', category: 'health', verify: 'tap' },
+  { id: 'brush_teeth', title: '점심 먹고 양치하기', category: 'health', verify: 'tap' },
+  { id: 'water_break', title: '쉬는 시간에 물 마시기', category: 'health', verify: 'tap' },
   { id: 'sky_photo', title: '밖에 나가 하늘 사진 찍기', category: 'health', verify: 'photo' },
 ];

@@ -354,7 +354,7 @@ export const dexKey = (st, line) => `${st}-${line}`;
 export function dexEntries() {
   return STAGES.flatMap((s, st) => Object.keys(LINES).map(line => ({
     key: dexKey(st, line), page: 'solo', st, line, name: speciesName({ line, branch: line, xp: s[0] }),
-    desc: DEX_TEXT[dexKey(st, line)] || `${LINES[line].n} 계통 ${STAGE_LABEL[st]} — ${LINE_TRAIT[line]}`,
+    desc: `${LINES[line].n} 계통 ${STAGE_LABEL[st]} — ${DEX_TEXT[dexKey(st, line)] || LINE_TRAIT[line]}`,
   })));
 }
 /** 이 튼튼몬이 거쳐 온 모습 (알 ~ 지금 단계). 어른부터는 갈래 계통 */
@@ -435,13 +435,14 @@ export function pickLine(key, rnd = Math.random) {
   if (!D || !D.lines.length) return null;
   return { text: D.lines[Math.floor(rnd() * D.lines.length)], face: D.face || 'normal' };
 }
-/** 앱을 열 때 인사 상황: 'comeback'(오래 안 옴) | 'morning' | 'hello' | null(오늘 이미 옴). 마지막 접속일을 적는다 */
+/** 앱을 열 때 인사 상황: 'comeback'(오래 안 옴) | 'late_night'(0~4시) | 'morning'(5~10시) | 'hello' | null(오늘 이미 옴). 마지막 접속일을 적는다 */
 export function greeting(S, today, hour) {
   const last = S.lastOpen;
   S.lastOpen = today;
   if (last === today) return null;
   if (last && daysBetween(last, today) >= COMEBACK_DAYS) return 'comeback';
-  return hour >= 5 && hour < 11 ? 'morning' : 'hello';
+  if (hour < 5) return 'late_night';
+  return hour < 11 ? 'morning' : 'hello';
 }
 
 /* ---------- 하루 정산 ---------- */
