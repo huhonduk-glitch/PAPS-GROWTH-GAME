@@ -13,6 +13,7 @@
 | `src/config/items.js` | 꾸미기 아이템 (모자·소품·배경·운동복, 기념일 한정) |
 | `src/config/dialogues.js` | 상황별 튼튼몬 대사·표정 |
 | `src/config/dex.js` | 도감 설명 (나중에 합체 진화 쪽 추가) |
+| `PELOG_LINK_FORMAT.md` | PE LOG → 튼튼몬 PAPS 등급 연동 코드 형식 v1 (7글자 `XXXX-XXX`, 참고 코드·예시·QR). Phase 6 에서 튼튼몬 쪽 `readCode` 를 이 문서대로 붙인다 |
 | `REVIEW_LISTS.md` | 선생님 검토용 목록표 (퀘스트·아이템·대사·도감·숫자). config 를 고치면 이 표도 다시 맞출 것 |
 | `src/draw.js` | 픽셀 튼튼몬 그림 (계통 × 단계, 자동 테두리) |
 | `dev/sprites.html` | 그림 모음 미리보기 (개발용) |
