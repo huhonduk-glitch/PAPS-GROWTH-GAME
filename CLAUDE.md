@@ -1,14 +1,15 @@
 # 튼튼몬 키우기 — 기획서 (Claude Code용)
 
 고등학생이 운동·식단 습관을 기르도록 돕는 다마고치식 육성 게임. 만든 사람: 체육교사 (브랜드 DEOK TT).
-현재 상태: **1단계 끝 · 1.5단계(계통 캐릭터 · 자세한 인증 규칙) (2026-10-13) · 고도화 Phase 1(잠듦 · 휴식권) (2026-10-22)** — 고도화 지시서는 `TUNTUN_PLAN.md` — Vite 로 옮겨 파일을 나눔(바닐라 JS, 캔버스 픽셀 그림, localStorage 저장). 테스트(vitest)·PWA(홈 화면 설치·오프라인) 있음.
+현재 상태: **1단계 끝 · 1.5단계(계통 캐릭터 · 자세한 인증 규칙) (2026-10-13) · 고도화 Phase 1(잠듦 · 휴식권) · Phase 2(오늘의 퀘스트 · 코인) (2026-10-22)** — 고도화 지시서는 `TUNTUN_PLAN.md` — Vite 로 옮겨 파일을 나눔(바닐라 JS, 캔버스 픽셀 그림, localStorage 저장). 테스트(vitest)·PWA(홈 화면 설치·오프라인) 있음.
 
 ### 파일
 | 파일 | 하는 일 |
 |---|---|
 | `index.html` | 화면 틀(글·버튼) |
 | `src/game.js` | **게임 계산만** (단계·인증·하루 정산·능력치·잠듦·휴식권). 화면·저장 코드 없음. 기존 규칙 숫자는 `RULES` 한 곳 |
-| `src/config/game.js` | 고도화로 새로 넣는 숫자(깨어날 때 체력, 휴식권 횟수 등) |
+| `src/config/game.js` | 고도화로 새로 넣는 숫자(깨어날 때 체력, 휴식권 횟수, 퀘스트 코인 등) |
+| `src/config/quests.js` | 오늘의 퀘스트 목록 (선생님이 직접 더하고 고치는 곳) |
 | `src/draw.js` | 픽셀 튼튼몬 그림 (계통 × 단계, 자동 테두리) |
 | `dev/sprites.html` | 그림 모음 미리보기 (개발용) |
 | `src/main.js` | 버튼 연결·화면 그리기 |
@@ -79,17 +80,28 @@
 - 연속 기록 = 운동(또는 휴식일)과 끼니 인증이 둘 다 있는 날이 이어진 수.
 - 체험용 "하루 넘기기" 버튼(offset)이 있다. 학생 배포판에서는 숨길 것. 날을 넘긴 동안은 시각 검사를 안 함.
 
-## 3. 저장 구조 (localStorage `tteuntteunmon.v1` · 안의 `v:3`)
+### 2-5. 오늘의 퀘스트 · 코인 (Phase 2 · 숫자는 `src/config/game.js`, 목록은 `src/config/quests.js`)
+- 코인은 **경험치·체력·진화·랭킹과 완전히 따로**. 퀘스트로는 잠든 튼튼몬도 깨어나지 않음. 코인은 꾸미기(Phase 3)에만 씀.
+- 하루 `QUESTS_PER_DAY`(3)개: 갈래(운동·식단·생활)마다 하나씩, 날짜+튼튼몬으로 정해지는 난수. 처음 열 때 그날 기록에 저장 → 같은 날은 늘 같음.
+- 인증: 원탭 `tap` +1 · 사진 `photo` +3 (`QUEST_COIN`, 퀘스트에 `coin` 이 있으면 그 값). 버튼 하나 = 인증 하나.
+  사진은 `capture="environment"` 로 카메라를 열고, 미리보기 1.5초 뒤 버림. **찍은 시각만 저장**.
+- 3개 모두 하면 보너스 `DAILY_ALL_CLEAR_BONUS`(3), 하루 한 번. 끝내면 튼튼몬이 1.8초 기뻐함(점프·하트).
+- 퀘스트 연속 기록: 1개 이상 한 날이 이어진 수. 주 1회 휴식일·휴식권 날은 끊지 않고 건너뜀.
+- 체중 감량·굶기·식사량 줄이기·외모 퀘스트는 넣지 않음 (테스트가 막음).
+
+## 3. 저장 구조 (localStorage `tteuntteunmon.v1` · 안의 `v:4`)
 ```
-{ v:3, offset, lastEval:'YYYY-MM-DD', rest:{주시작일:쓴날}, weeks:{주시작일:{hard,strength,flex,minutes,rainbow,done[],xp}},
+{ v:4, offset, coins, lastEval:'YYYY-MM-DD', rest:{주시작일:쓴날}, weeks:{주시작일:{hard,strength,flex,minutes,rainbow,done[],xp}},
   passes:{ exam:[{start,end}], sick:['YYYY-MM-DD'] },
   pet:{ name, line, branch, height, stats:{cardio,strength,flex,power}, base:{…}, train:{…분}, hp, xp, sleeping, born },
   logs:{ 'YYYY-MM-DD': { status:'ex'|'rest'|'pass'|'sleep'|'miss', bonus:{goalPlus,variety,rainbow},
+    quests:{ ids[], done:{id:{verify,at}}, allClear },
     ex:[{kind,cat,min,int,start,amount,warm,proof,photo,photoOk,flag,xp,at}],
     meals:[{slot,place,groups[],drink,photo,photoOk,xp,at}] } } }
 ```
 - 예전 `v:1` 저장은 불러올 때 `migrate()` 가 옮김 (경험치는 같은 단계가 되게 늘림, 계통은 그때 능력치로).
 - `v:2` → `v:3`: 소멸(`alive:false`)은 잠듦(`sleeping:true`, 체력 0)으로, `diedOn` 은 지우고 `passes` 칸 추가.
+- `v:3` → `v:4`: `coins:0` 추가.
 - 사진은 200px JPEG(dataURL)로 줄여 저장한다.
 - 그림 확인: `npm run dev` → `/dev/sprites.html` (단계 × 계통 모음 · `?hp=20` 지친 모습 · `?cheer` 기쁜 모습 · 맨 아래 잠듦·휴식권·체력 20 비교 줄). 배포에는 안 들어감.
 

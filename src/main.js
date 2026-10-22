@@ -6,8 +6,9 @@ import {
   balancedCount, dayGroups, statsFromInputs, lineFromStats, branchFromTraining, speciesName, newPet, newState, evaluate,
   certExercise, certMeal, weekId, weekCounts, weekMissions, streak, remeasure,
   restPassOn, passesLeft, useSickPass, useExamPass, cancelExamPass,
+  questOf, questCoin, todayQuests, completeQuest, questStreak,
 } from './game.js';
-import { LOW_HP_WARN, EXAM_REST_MAX_DAYS } from './config/game.js';
+import { LOW_HP_WARN, EXAM_REST_MAX_DAYS, DAILY_ALL_CLEAR_BONUS, QUEST_CHEER_MS } from './config/game.js';
 import { draw } from './draw.js';
 import { load, save as store, clear } from './storage.js';
 
@@ -195,7 +196,8 @@ function closePanels() { ['exPanel', 'mealPanel', 'infoPanel'].forEach(i => $(i)
 let toastT;
 function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2800); }
 let cheerUntil = 0;
-function say(m, cheer) { $('lcdMsg').textContent = m; if (cheer) cheerUntil = performance.now() + 2500; }
+/** cheer = true(2.5초) 또는 기뻐할 시간(ms) */
+function say(m, cheer) { $('lcdMsg').textContent = m; if (cheer) cheerUntil = performance.now() + (cheer === true ? 2500 : cheer); }
 
 /** 잠에서 깨어났을 때 — 처벌보다 반겨 주기 */
 function welcome() { say(`다시 만나서 반가워! ${S.pet.name}(이)가 깨어났어요. 오늘도 같이 해요!`, true); }
@@ -214,7 +216,7 @@ function moodLine() {
 }
 function render() {
   const has = !!S;
-  $('keys').hidden = !has; $('demo').hidden = !has;
+  $('keys').hidden = !has; $('demo').hidden = !has; $('questCard').hidden = !has;
   if (!has) {
     $('setup').hidden = false; setupMode = 'new'; openSetupLabels();
     $('petName').textContent = '새 알'; $('stageTxt').textContent = '알'; $('dayTxt').textContent = 'DAY 1'; setBars(RULES.startHp, 0); renderLineBox(); return;
@@ -225,6 +227,46 @@ function render() {
   $('dayTxt').textContent = `DAY ${daysBetween(p.born, today()) + 1}`;
   setBars(p.hp, p.xp);
   if (performance.now() > cheerUntil) $('lcdMsg').textContent = moodLine();
+  renderQuests();
+}
+
+/* ---------- 오늘의 퀘스트 (코인만 · 경험치·체력·진화와 따로) ---------- */
+let photoQuest = null;
+function renderQuests() {
+  const t = today(), fresh = !(S.logs[t] && S.logs[t].quests);
+  const Q = todayQuests(S, t), n = questStreak(S, t);
+  if (fresh) save(); // 처음 뽑은 3개를 저장 → 같은 날은 늘 같음
+  const doneN = Q.ids.filter(id => Q.done[id]).length;
+  $('coinTxt').textContent = `🪙 ${S.coins || 0}`;
+  $('questSub').textContent = `${doneN}/${Q.ids.length} 완료 · 모두 하면 보너스 🪙${DAILY_ALL_CLEAR_BONUS}${n ? ` · 🔥 연속 ${n}일` : ''}`;
+  $('questList').innerHTML = Q.ids.map(questOf).filter(Boolean).map(q => {
+    const d = Q.done[q.id], coin = questCoin(q);
+    return `<div class="quest${d ? ' done' : ''}"><span class="qbox" aria-hidden="true">${d ? '✓' : ''}</span><span class="qtitle">${esc(q.title)}</span>`
+      + (d ? `<span class="qok">완료 🪙${coin}</span>` : `<button class="btn small" data-quest="${esc(q.id)}">${q.verify === 'photo' ? '📷 찍기' : '했어요'} <span class="qc">+${coin}</span></button>`)
+      + '</div>';
+  }).join('');
+  $('questList').querySelectorAll('[data-quest]').forEach(b => b.onclick = () => {
+    const q = questOf(b.dataset.quest);
+    if (q.verify === 'photo') { photoQuest = q.id; $('questPhoto').value = ''; $('questPhoto').click(); }
+    else finishQuest(q.id, 'tap');
+  });
+}
+function finishQuest(id, verify) {
+  const r = completeQuest(S, today(), id, verify);
+  if (!r.ok) { renderQuests(); return; }
+  save(); renderQuests();
+  if (r.allClear) { say(`오늘의 퀘스트 모두 완료! 보너스 코인 +${r.bonus}`, QUEST_CHEER_MS); toast(`🎉 오늘 퀘스트를 다 했어요! 코인 +${r.coin + r.bonus}`); }
+  else say(`퀘스트 완료! 코인 +${r.coin}`, QUEST_CHEER_MS);
+}
+/** 사진 퀘스트: 사진은 저장하지 않는다 — 잠깐 미리보기만 보여주고 버리고, 끝낸 시각만 남김 */
+function onQuestPhoto(e) {
+  const f = e.target.files[0], id = photoQuest;
+  photoQuest = null; e.target.value = '';
+  if (!f || !id) return;
+  const url = URL.createObjectURL(f);
+  $('questPrev').src = url; $('questPrev').hidden = false;
+  setTimeout(() => { $('questPrev').hidden = true; $('questPrev').removeAttribute('src'); URL.revokeObjectURL(url); }, 1500);
+  finishQuest(id, 'photo');
 }
 function openSetupLabels() { $('setupTitle').textContent = '내 튼튼몬 만들기'; $('nameRow').hidden = false; $('bCreate').textContent = '알 받기'; $('bSetupCancel').hidden = true; }
 function setBars(hp, xp) {
@@ -372,6 +414,7 @@ $('bCreate').onclick = () => {
 };
 $('bSetupCancel').onclick = () => { $('setup').hidden = true; openPanel('infoPanel'); };
 $('bRemeasure').onclick = () => openSetup('remeasure');
+$('questPhoto').onchange = onQuestPhoto;
 $('bRestart').onclick = () => { if (confirm('지금 튼튼몬의 기록이 모두 사라져요. 정말 다시 시작할까요?')) { closePanels(); restart(); } };
 $('bNext').onclick = () => {
   S.offset++; const n = evaluate(S, today()); save(); render();

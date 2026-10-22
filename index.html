@@ -35,6 +35,15 @@
     </div>
   </div>
 
+  <!-- 오늘의 퀘스트 (코인만 · 경험치·체력과 따로) -->
+  <section class="card" id="questCard" hidden>
+    <div class="qhead"><h2>🌱 오늘의 퀘스트</h2><span class="coins" id="coinTxt">🪙 0</span></div>
+    <p class="hint" id="questSub"></p>
+    <div class="quests" id="questList"></div>
+    <input id="questPhoto" type="file" accept="image/*" capture="environment" hidden>
+    <img id="questPrev" class="preview-img" alt="퀘스트 사진 미리보기 (저장하지 않아요)" hidden>
+  </section>
+
   <!-- 처음 만들기 (다시 재기에도 씀) -->
   <section class="card" id="setup">
     <h2 id="setupTitle">내 튼튼몬 만들기</h2>
@@ -126,6 +135,10 @@
       <p class="hint">운동하면 체력 +분÷6, 균형식이면 +3. 날짜가 바뀔 때 운동 20분이 안 되면 체력 -18 (주 1회는 휴식일로 봐 줘요), 끼니 인증이 하나도 없으면 -12, 균형 잡힌 끼니(간식 빼고)마다 +2.</p>
       <p class="hint">체력이 0이 되면 튼튼몬이 잠들어요. 사라지지 않고, 경험치와 단계도 그대로예요. 운동을 한 번 인증하거나 끼니(간식 말고)를 한 번 인증하면 체력 30으로 깨어나요.</p>
       <p class="hint">휴식권: 시험기간 휴식권은 학기마다 2번, 한 번에 7일까지 · 아픈 날 휴식권은 한 달에 3번, 하루씩. 쓰는 동안은 체력이 줄지 않아요. 쉬는 이유는 묻지 않아요. ('기록'에서 써요)</p>
+    </details>
+    <details class="rule"><summary>오늘의 퀘스트와 코인</summary>
+      <p class="hint">매일 퀘스트 3개(운동·식단·생활 하나씩)가 나와요. [했어요]를 누르면 코인 +1, 사진 퀘스트는 찍으면 +3. 3개 모두 하면 보너스 +3.</p>
+      <p class="hint">코인은 경험치·체력과 따로예요. 나중에 꾸미기에 써요. 사진은 저장하지 않고, 찍었다는 시각만 남아요.</p>
     </details>
     <div class="btns" id="demo" hidden>
       <button class="btn ghost small" id="bNext">체험용: 하루 넘기기</button>

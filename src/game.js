@@ -1,8 +1,12 @@
 // 게임 계산만 모은 파일 (화면·저장과 분리). 숫자를 바꾸면 CLAUDE.md 2장도 같이 고친다.
 // 기준: WHO 신체활동 지침(2020, 5~17세) — 하루 평균 60분 중강도 이상, 주 3일 고강도, 주 3일 근력.
-import { WAKE_UP_HP, EXAM_REST_MAX_DAYS, EXAM_REST_PER_TERM, SICK_REST_PER_MONTH, TERM1_MONTHS } from './config/game.js';
+import {
+  WAKE_UP_HP, EXAM_REST_MAX_DAYS, EXAM_REST_PER_TERM, SICK_REST_PER_MONTH, TERM1_MONTHS,
+  QUESTS_PER_DAY, QUEST_COIN, DAILY_ALL_CLEAR_BONUS,
+} from './config/game.js';
+import { QUESTS, QUEST_CATEGORIES } from './config/quests.js';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 /* ---------- 단계 · 계통 ---------- */
 export const STAGES = [[0, '알'], [20, '아기'], [120, '꼬마'], [400, '청소년'], [900, '어른'], [1600, '챔피언']];
@@ -187,7 +191,7 @@ export function newPet(name, st, today) {
 }
 const emptyPasses = () => ({ exam: [], sick: [] });
 export function newState(pet, today, offset = 0) {
-  return { v: SAVE_VERSION, offset, logs: {}, rest: {}, weeks: {}, passes: emptyPasses(), lastEval: today, pet };
+  return { v: SAVE_VERSION, offset, logs: {}, rest: {}, weeks: {}, passes: emptyPasses(), coins: 0, lastEval: today, pet };
 }
 
 /** PAPS·인바디를 다시 쟀을 때: 새 기준값 + 그동안 운동으로 오른 만큼. 계통은 그대로 */
@@ -264,6 +268,57 @@ export function cancelExamPass(S, today, start) {
   if (start <= today) return { ok: false, reason: 'started' };
   P.exam.splice(i, 1);
   return { ok: true };
+}
+
+/* ---------- 오늘의 퀘스트 · 코인 (경험치·체력·진화와 따로) ---------- */
+/** 글자로 정해지는 난수 — 같은 날·같은 튼튼몬이면 늘 같은 순서 */
+function seeded(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+  return () => { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); h ^= h >>> 16; return (h >>> 0) / 4294967296; };
+}
+export const questOf = id => QUESTS.find(q => q.id === id) || null;
+export const questCoin = q => q.coin ?? QUEST_COIN[q.verify] ?? 0;
+/** 퀘스트 뽑기: 갈래(운동·식단·생활)마다 하나씩, 모자라면 남은 것에서 */
+export function pickQuests(day, salt = '', pool = QUESTS, n = QUESTS_PER_DAY) {
+  const rnd = seeded(`${day}|${salt}`), left = [...pool], out = [];
+  const take = list => { const q = list[Math.floor(rnd() * list.length)]; out.push(q.id); left.splice(left.indexOf(q), 1); };
+  Object.keys(QUEST_CATEGORIES).forEach(c => { const list = left.filter(q => q.category === c); if (out.length < n && list.length) take(list); });
+  while (out.length < n && left.length) take(left);
+  return out;
+}
+/** 오늘의 퀘스트. 처음 열 때 뽑아 저장 → 같은 날은 다시 열어도 같은 3개 */
+export function todayQuests(S, today) {
+  const L = dayLog(S, today);
+  if (!L.quests) L.quests = { ids: pickQuests(today, `${S.pet.born}|${S.pet.name}`), done: {}, allClear: false };
+  return L.quests;
+}
+/**
+ * 퀘스트 끝내기. verify = 'tap' | 'photo' (퀘스트에 정해진 방식만). 사진은 저장하지 않고 끝낸 시각만 남긴다.
+ * 코인만 준다 — 경험치·체력·진화·랭킹에는 넣지 않는다. 결과 {ok, reason?, coin, bonus, allClear}
+ */
+export function completeQuest(S, today, id, verify, at = Date.now()) {
+  const Q = todayQuests(S, today), q = questOf(id);
+  if (!q || !Q.ids.includes(id)) return { ok: false, reason: 'unknown' };
+  if (Q.done[id]) return { ok: false, reason: 'done' };
+  if (verify !== q.verify) return { ok: false, reason: 'verify' };
+  const coin = questCoin(q);
+  Q.done[id] = { verify, at };
+  let bonus = 0;
+  if (!Q.allClear && Q.ids.every(x => Q.done[x] || !questOf(x))) { Q.allClear = true; bonus = DAILY_ALL_CLEAR_BONUS; }
+  S.coins = (S.coins || 0) + coin + bonus;
+  return { ok: true, coin, bonus, allClear: bonus > 0 };
+}
+/** 퀘스트 연속 기록: 1개 이상 끝낸 날이 이어진 수. 주 1회 휴식일·휴식권 날은 끊지 않고 건너뜀 (+ 오늘 했으면 1) */
+export function questStreak(S, today) {
+  const did = L => !!(L && L.quests && Object.keys(L.quests.done).length);
+  let n = 0;
+  for (let d = addDay(today, -1); ; d = addDay(d, -1)) {
+    const L = S.logs[d];
+    if (did(L)) n++;
+    else if (!(L && (L.status === 'rest' || L.status === 'pass' || restPassOn(S, d)))) break;
+  }
+  return n + (did(S.logs[today]) ? 1 : 0);
 }
 
 /* ---------- 하루 정산 ---------- */
@@ -462,7 +517,7 @@ export function streak(S, today) {
   return n;
 }
 
-/* ---------- 예전 저장 옮기기 (v1 → v2 → v3) ---------- */
+/* ---------- 예전 저장 옮기기 (v1 → v2 → v3 → v4) ---------- */
 const V1_STAGES = [0, 15, 60, 140, 260, 420];
 /** 예전 경험치 → 새 경험치 (같은 단계, 같은 비율 위치) */
 export function migrateXp(xp) {
@@ -477,6 +532,7 @@ export function migrate(v) {
   if (!v || !v.pet) return null;
   if (v.v === 1) v = migrateV1(v);
   if (v.v === 2) v = migrateV2(v);
+  if (v.v === 3) v = { ...v, v: 4, coins: v.coins || 0 }; // v3 → v4: 코인 칸 추가
   return v.v === SAVE_VERSION ? v : null;
 }
 /** v2 → v3: 소멸(alive:false)은 잠듦으로. 휴식권 칸 추가 */

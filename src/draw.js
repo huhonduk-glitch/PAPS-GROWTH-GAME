@@ -245,6 +245,15 @@ function zzz(L, t) {
     for (let k = 1; k < n - 1; k++) L.set(x0 + n - 1 - k, y0 + k, WHITE);
   }
 }
+/** 기뻐할 때 떠오르는 하트 두 개 */
+function hearts(L, t) {
+  const HEART = [[1, 0], [3, 0], [0, 1], [1, 1], [2, 1], [3, 1], [4, 1], [1, 2], [2, 2], [3, 2], [2, 3]];
+  [[14, 0], [52, 0.5]].forEach(([x0, off]) => {
+    const ph = (t / 900 + off) % 1, y0 = Math.round(30 - ph * 20);
+    HEART.forEach(([dx, dy]) => L.set(x0 + dx, y0 + dy, [255, 96, 128]));
+    L.set(x0 + 1, y0 + 1, [255, 190, 205]);
+  });
+}
 /** 휴식권 쓰는 중: 체크무늬 이불 */
 function blanket(F, cx, top) {
   const B = new Layer();
@@ -290,6 +299,7 @@ export function draw(ctx, pet, t, { preview = false, cheer = false, resting = fa
   }
   if (resting) blanket(F, 36, GROUND - [7, 4, 5, 9, 9, 9][st]); // 얼굴은 가리지 않게
   if (sleep) zzz(top, t);
+  else if (cheer) hearts(F, t);
   const img = ctx.createImageData(W, H);
   F.p.forEach((c, i) => { const col = top.p[i] || (sleep ? mix(c || BG, NIGHT, 0.45) : c || BG); img.data[i * 4] = col[0]; img.data[i * 4 + 1] = col[1]; img.data[i * 4 + 2] = col[2]; img.data[i * 4 + 3] = 255; });
   ctx.putImageData(img, 0, 0);

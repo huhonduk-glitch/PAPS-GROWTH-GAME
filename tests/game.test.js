@@ -4,8 +4,12 @@ import {
   newPet, newState, evaluate, certExercise, certMeal, checkPlausible, weekCounts, streak, remeasure,
   migrate, migrateXp, addDay, daysBetween, weekId, todayKey, toMin,
   termOf, passesLeft, useSickPass, useExamPass, cancelExamPass, restPassOn,
+  SAVE_VERSION, questOf, questCoin, pickQuests, todayQuests, completeQuest, questStreak,
 } from '../src/game.js';
-import { EXAM_REST_MAX_DAYS, EXAM_REST_PER_TERM, SICK_REST_PER_MONTH } from '../src/config/game.js';
+import {
+  EXAM_REST_MAX_DAYS, EXAM_REST_PER_TERM, SICK_REST_PER_MONTH, QUESTS_PER_DAY, QUEST_COIN, DAILY_ALL_CLEAR_BONUS,
+} from '../src/config/game.js';
+import { QUESTS, QUEST_CATEGORIES } from '../src/config/quests.js';
 import { load, save, clear, KEY } from '../src/storage.js';
 
 const D0 = '2026-10-12'; // 월요일
@@ -392,6 +396,88 @@ describe('휴식권', () => {
   });
 });
 
+describe('오늘의 퀘스트 · 코인', () => {
+  const finishAll = (S, day) => { const Q = todayQuests(S, day); Q.ids.forEach(id => completeQuest(S, day, id, questOf(id).verify)); return Q; };
+  it('퀘스트 목록: 15개 이상, id 겹침 없음, 갈래·인증 방식 올바름', () => {
+    expect(QUESTS.length).toBeGreaterThanOrEqual(15);
+    expect(new Set(QUESTS.map(q => q.id)).size).toBe(QUESTS.length);
+    QUESTS.forEach(q => {
+      expect(Object.keys(QUEST_CATEGORIES)).toContain(q.category);
+      expect(['tap', 'photo']).toContain(q.verify);
+    });
+    Object.keys(QUEST_CATEGORIES).forEach(c => expect(QUESTS.some(q => q.category === c)).toBe(true));
+  });
+  it('건강 원칙: 체중 감량·굶기·식사량 줄이기·외모 퀘스트 없음', () => {
+    QUESTS.forEach(q => expect(q.title).not.toMatch(/다이어트|체중|몸무게|칼로리|굶|덜 먹|적게 먹|줄이|살 ?빼|살빠|몸매|외모|뱃살/));
+  });
+  it(`하루 ${QUESTS_PER_DAY}개, 갈래마다 하나씩, 같은 날은 늘 같음`, () => {
+    const a = pickQuests(D0, 'x'), b = pickQuests(D0, 'x');
+    expect(a).toEqual(b);
+    expect(a.length).toBe(QUESTS_PER_DAY);
+    expect(new Set(a.map(id => questOf(id).category)).size).toBe(3);
+  });
+  it('날짜가 바뀌면 새로 뽑힘 (여러 날 중 다른 날이 있음)', () => {
+    const days = [0, 1, 2, 3, 4, 5, 6].map(i => pickQuests(addDay(D0, i), 'x').join());
+    expect(new Set(days).size).toBeGreaterThan(1);
+  });
+  it('처음 열 때 저장 → 다시 열어도 같은 3개 (목록이 바뀌어도)', () => {
+    const S = base();
+    const ids = [...todayQuests(S, D0).ids];
+    const reopened = JSON.parse(JSON.stringify(S));
+    expect(todayQuests(reopened, D0).ids).toEqual(ids);
+  });
+  it(`원탭 +${QUEST_COIN.tap} · 사진 +${QUEST_COIN.photo}, 같은 퀘스트 두 번 안 됨, 정해진 방식만`, () => {
+    const S = base(); S.logs[D0] = { ex: [], meals: [], bonus: {}, quests: { ids: ['water_1', 'veggie_lunch', 'stretch_3'], done: {}, allClear: false } };
+    expect(completeQuest(S, D0, 'water_1', 'tap')).toMatchObject({ ok: true, coin: QUEST_COIN.tap, bonus: 0 });
+    expect(completeQuest(S, D0, 'water_1', 'tap').reason).toBe('done');
+    expect(completeQuest(S, D0, 'veggie_lunch', 'tap').reason).toBe('verify');
+    expect(completeQuest(S, D0, 'veggie_lunch', 'photo')).toMatchObject({ ok: true, coin: QUEST_COIN.photo });
+    expect(completeQuest(S, D0, 'fruit', 'tap').reason).toBe('unknown'); // 오늘 퀘스트 아님
+    expect(S.coins).toBe(QUEST_COIN.tap + QUEST_COIN.photo);
+    expect(S.logs[D0].quests.done.veggie_lunch).toEqual({ verify: 'photo', at: expect.any(Number) }); // 사진은 저장 안 함
+  });
+  it(`3개 모두 끝내면 보너스 +${DAILY_ALL_CLEAR_BONUS} (하루 한 번)`, () => {
+    const S = base();
+    const Q = todayQuests(S, D0);
+    const results = Q.ids.map(id => completeQuest(S, D0, id, questOf(id).verify));
+    expect(results.at(-1)).toMatchObject({ allClear: true, bonus: DAILY_ALL_CLEAR_BONUS });
+    expect(results.slice(0, -1).every(r => !r.allClear)).toBe(true);
+    expect(S.coins).toBe(Q.ids.reduce((a, id) => a + questCoin(questOf(id)), 0) + DAILY_ALL_CLEAR_BONUS);
+  });
+  it('퀘스트는 경험치·체력·진화에 들어가지 않음', () => {
+    const S = base(); const { hp, xp } = S.pet;
+    finishAll(S, D0);
+    expect(S.pet.hp).toBe(hp);
+    expect(S.pet.xp).toBe(xp);
+  });
+  it('잠든 튼튼몬은 퀘스트로 깨어나지 않음 (코인은 받음)', () => {
+    const S = base(); S.pet.sleeping = true; S.pet.hp = 0;
+    finishAll(S, D0);
+    expect(S.pet.sleeping).toBe(true);
+    expect(S.coins).toBeGreaterThan(0);
+  });
+  it('퀘스트 연속 기록: 이어지면 늘고, 빈 날이면 끊김', () => {
+    const S = base();
+    finishAll(S, D0); finishAll(S, addDay(D0, 1));
+    expect(questStreak(S, addDay(D0, 1))).toBe(2);
+    S.rest[weekId(D0)] = D0; // 주 1회 휴식일은 이미 씀
+    evaluate(S, addDay(D0, 4));
+    expect(questStreak(S, addDay(D0, 4))).toBe(0);
+  });
+  it('주 1회 휴식일 · 휴식권 날은 퀘스트 연속 기록을 끊지 않음', () => {
+    const S = base();
+    finishAll(S, D0); ex(S, D0, 20);         // 월: 운동도 해서 휴식일 안 씀
+    useSickPass(S, addDay(D0, 1));           // 화: 휴식권
+    // 수: 아무것도 안 함 → 주 1회 휴식일로
+    finishAll(S, addDay(D0, 3));             // 목
+    evaluate(S, addDay(D0, 4));
+    expect(S.logs[addDay(D0, 2)].status).toBe('rest');
+    expect(questStreak(S, addDay(D0, 4))).toBe(2);
+    finishAll(S, addDay(D0, 4));
+    expect(questStreak(S, addDay(D0, 4))).toBe(3);
+  });
+});
+
 describe('연속 기록 · 다시 재기', () => {
   it('연속 기록', () => {
     const S = base();
@@ -419,7 +505,8 @@ describe('예전 저장(v1) 옮기기', () => {
   };
   it('계통·경험치·기록을 새 모양으로', () => {
     const S = migrate(JSON.parse(JSON.stringify(v1)));
-    expect(S.v).toBe(3);
+    expect(S.v).toBe(SAVE_VERSION);
+    expect(S.coins).toBe(0);
     expect(S.pet.sleeping).toBe(false);
     expect(S.pet).not.toHaveProperty('alive');
     expect(S.passes).toEqual({ exam: [], sick: [] });
@@ -436,7 +523,7 @@ describe('예전 저장(v1) 옮기기', () => {
     const v2 = { v: 2, offset: 0, lastEval: addDay(D0, 3), rest: {}, weeks: {}, logs: { [D0]: { ex: [], meals: [], bonus: {} } },
       pet: { name: '몬', line: 'wind', branch: null, height: 160, stats: {}, base: {}, train: {}, hp: 0, xp: 300, alive: false, born: D0, diedOn: addDay(D0, 2) } };
     const S = migrate(v2);
-    expect(S.v).toBe(3);
+    expect(S.v).toBe(SAVE_VERSION);
     expect(S.pet).toMatchObject({ sleeping: true, hp: 0, xp: 300 });
     expect(S.pet).not.toHaveProperty('alive');
     expect(S.pet).not.toHaveProperty('diedOn');
@@ -448,6 +535,10 @@ describe('예전 저장(v1) 옮기기', () => {
   it('v2 살아 있던 데이터 → 깨어 있음', () => {
     const S = migrate({ v: 2, lastEval: D0, logs: {}, rest: {}, pet: { hp: 40, xp: 10, alive: true } });
     expect(S.pet).toMatchObject({ sleeping: false, hp: 40 });
+  });
+  it('v3 → v4: 코인 칸 추가, 나머지 그대로', () => {
+    const S = migrate({ v: 3, lastEval: D0, logs: {}, rest: {}, passes: { exam: [], sick: [D0] }, pet: { hp: 40, xp: 10, sleeping: false } });
+    expect(S).toMatchObject({ v: 4, coins: 0, passes: { sick: [D0] } });
   });
   it('모르는 버전은 버림', () => {
     expect(migrate({ v: 9, pet: {} })).toBeNull();
@@ -481,4 +572,5 @@ it('RULES 숫자가 기획서 2장과 같음', () => {
 it('config/game.js 숫자가 지시서 Phase 1 초기값과 같음', async () => {
   const C = await import('../src/config/game.js');
   expect(C).toMatchObject({ WAKE_UP_HP: 30, LOW_HP_WARN: 20, EXAM_REST_MAX_DAYS: 7, EXAM_REST_PER_TERM: 2, SICK_REST_PER_MONTH: 3 });
+  expect(C).toMatchObject({ QUESTS_PER_DAY: 3, QUEST_COIN: { tap: 1, photo: 3 }, DAILY_ALL_CLEAR_BONUS: 3 });
 });

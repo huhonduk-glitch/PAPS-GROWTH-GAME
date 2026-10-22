@@ -66,6 +66,18 @@ input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid
 .pass>div:first-child{display:flex;flex-direction:column;gap:2px}
 .pass .btn{min-height:44px}
 .btn:disabled{opacity:.45}
+.qhead{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.coins{font-family:var(--f-px);font-size:.9rem;background:var(--bg);border-radius:999px;padding:6px 12px;white-space:nowrap}
+.quests{display:flex;flex-direction:column;gap:8px}
+.quest{display:flex;align-items:center;gap:10px;background:var(--bg);border-radius:12px;padding:8px 10px;min-height:56px}
+.qbox{flex:none;width:24px;height:24px;border-radius:7px;border:2px solid var(--line);display:grid;place-items:center;font-weight:700;color:#fff}
+.quest.done .qbox{background:var(--ok);border-color:var(--ok)}
+.qtitle{flex:1;font-size:.95rem;line-height:1.3}
+.quest.done .qtitle{color:var(--ink-2)}
+.quest .btn{flex:none;min-height:44px;min-width:84px}
+.qc{font-family:var(--f-px);font-size:.62rem;opacity:.8}
+.qok{flex:none;font-size:.8rem;color:var(--ok);white-space:nowrap}
+#questPrev{max-height:120px;object-fit:cover}
 .btn.danger{color:var(--warn);border-color:var(--warn);margin-top:6px}
 .booked{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:.88rem}
 .booked .btn{min-height:40px}
