@@ -12,13 +12,20 @@ STAGES.forEach(([xp, n], st) => {
   const tr = document.createElement('tr'); tr.innerHTML = `<th>${n}</th>`;
   lines.forEach(l => {
     const td = document.createElement('td'); const c = document.createElement('canvas'); c.width = W; c.height = H;
-    draw(c.getContext('2d'), { line: l, branch: st >= 4 ? l : null, xp, hp, alive: true, height: 165 }, time, { cheer });
+    draw(c.getContext('2d'), { line: l, branch: st >= 4 ? l : null, xp, hp, height: 165 }, time, { cheer });
     const sp = SPECIES[st]; td.append(c, document.createElement('br'), st ? (typeof sp === 'string' ? sp : sp[l]) : LINES[l].n + ' 알');
     tr.appendChild(td);
   });
   t.appendChild(tr);
 });
-const tr = document.createElement('tr'); tr.innerHTML = '<th>소멸</th>';
-const td = document.createElement('td'); const c = document.createElement('canvas'); c.width = W; c.height = H;
-draw(c.getContext('2d'), { line: 'wind', xp: 500, hp: 0, alive: false, height: 165 }, time); td.appendChild(c); tr.appendChild(td); t.appendChild(tr);
+// 잠듦(체력 0) · 휴식권(이불) · 비교용 체력 20(눈 감김) — 단계별로 한 칸씩
+[['잠듦', { hp: 0, sleeping: true }, {}], ['휴식권', { hp: 60 }, { resting: true }], ['체력 20', { hp: 20 }, {}]].forEach(([n, p, o]) => {
+  const tr = document.createElement('tr'); tr.innerHTML = `<th>${n}</th>`;
+  [0, 20, 120, 400, 900, 1600].forEach((xp, i) => {
+    const td = document.createElement('td'); const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const l = lines[i % lines.length];
+    draw(c.getContext('2d'), { line: l, branch: xp >= 900 ? l : null, xp, height: 165, ...p }, time, o); td.appendChild(c); tr.appendChild(td);
+  });
+  t.appendChild(tr);
+});
 </script></body></html>

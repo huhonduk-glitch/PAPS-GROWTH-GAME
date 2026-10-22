@@ -1,7 +1,8 @@
 // 게임 계산만 모은 파일 (화면·저장과 분리). 숫자를 바꾸면 CLAUDE.md 2장도 같이 고친다.
 // 기준: WHO 신체활동 지침(2020, 5~17세) — 하루 평균 60분 중강도 이상, 주 3일 고강도, 주 3일 근력.
+import { WAKE_UP_HP, EXAM_REST_MAX_DAYS, EXAM_REST_PER_TERM, SICK_REST_PER_MONTH, TERM1_MONTHS } from './config/game.js';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 /* ---------- 단계 · 계통 ---------- */
 export const STAGES = [[0, '알'], [20, '아기'], [120, '꼬마'], [400, '청소년'], [900, '어른'], [1600, '챔피언']];
@@ -181,11 +182,12 @@ export function newPet(name, st, today) {
   return {
     name: (name || '').trim().slice(0, 8) || '튼튼이', line: lineFromStats(st), branch: null, height: st.height,
     stats: pickStats(st), base: pickStats(st), train: { cardio: 0, strength: 0, flex: 0, power: 0 },
-    hp: RULES.startHp, xp: 0, alive: true, born: today,
+    hp: RULES.startHp, xp: 0, sleeping: false, born: today,
   };
 }
+const emptyPasses = () => ({ exam: [], sick: [] });
 export function newState(pet, today, offset = 0) {
-  return { v: SAVE_VERSION, offset, logs: {}, rest: {}, weeks: {}, lastEval: today, pet };
+  return { v: SAVE_VERSION, offset, logs: {}, rest: {}, weeks: {}, passes: emptyPasses(), lastEval: today, pet };
 }
 
 /** PAPS·인바디를 다시 쟀을 때: 새 기준값 + 그동안 운동으로 오른 만큼. 계통은 그대로 */
@@ -203,6 +205,65 @@ function addXp(S, n) {
   const st1 = stageOf(S.pet.xp);
   if (st1 >= 4 && !S.pet.branch) S.pet.branch = branchFromTraining(S.pet.train, S.pet.line);
   return st1 > st0;
+}
+
+/* ---------- 잠듦 · 휴식권 ---------- */
+/** 잠든 튼튼몬을 깨운다. 깨웠으면 true (체력은 WAKE_UP_HP 부터) */
+function wake(S) {
+  if (!S.pet.sleeping) return false;
+  S.pet.sleeping = false;
+  S.pet.hp = Math.max(S.pet.hp, WAKE_UP_HP);
+  return true;
+}
+const passesOf = S => S.passes || (S.passes = emptyPasses());
+/** 학기: 3~8월 'YYYY-1', 9월~다음 해 2월 'YYYY-2' (1·2월은 앞 해) */
+export function termOf(k) {
+  const [y, m] = k.split('-').map(Number);
+  if (m >= TERM1_MONTHS[0] && m <= TERM1_MONTHS[1]) return `${y}-1`;
+  return m > TERM1_MONTHS[1] ? `${y}-2` : `${y - 1}-2`;
+}
+/** 그날 쓴 휴식권: 'exam' | 'sick' | null */
+export function restPassOn(S, k) {
+  const P = passesOf(S);
+  if (P.sick.includes(k)) return 'sick';
+  if (P.exam.some(x => x.start <= k && k <= x.end)) return 'exam';
+  return null;
+}
+/** 남은 휴식권 (그날이 든 달·학기 기준) */
+export function passesLeft(S, day) {
+  const P = passesOf(S);
+  return {
+    sick: SICK_REST_PER_MONTH - P.sick.filter(d => d.slice(0, 7) === day.slice(0, 7)).length,
+    exam: EXAM_REST_PER_TERM - P.exam.filter(x => termOf(x.start) === termOf(day)).length,
+  };
+}
+/** 아픈 날 휴식권: 오늘 하루 체력이 줄지 않음. 사유는 받지 않는다 */
+export function useSickPass(S, today) {
+  if (S.pet.sleeping) return { ok: false, reason: 'sleeping' };
+  if (restPassOn(S, today)) return { ok: false, reason: 'already' };
+  if (passesLeft(S, today).sick <= 0) return { ok: false, reason: 'none' };
+  passesOf(S).sick.push(today);
+  return { ok: true };
+}
+/** 시험기간 휴식권: start 부터 days 일 동안 체력이 줄지 않음. 시작일은 오늘이나 그 뒤, 학기는 시작일 기준 */
+export function useExamPass(S, today, start, days) {
+  days = Math.trunc(days);
+  if (S.pet.sleeping) return { ok: false, reason: 'sleeping' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start || '') || start < today) return { ok: false, reason: 'start' };
+  if (!(days >= 1 && days <= EXAM_REST_MAX_DAYS)) return { ok: false, reason: 'days' };
+  const P = passesOf(S), end = addDay(start, days - 1);
+  if (passesLeft(S, start).exam <= 0) return { ok: false, reason: 'none' };
+  if (P.exam.some(x => start <= x.end && x.start <= end)) return { ok: false, reason: 'overlap' };
+  P.exam.push({ start, end });
+  return { ok: true, end };
+}
+/** 시험기간 휴식권 취소: 시작일 전(오늘보다 뒤)이면 지우고 횟수를 돌려준다 */
+export function cancelExamPass(S, today, start) {
+  const P = passesOf(S), i = P.exam.findIndex(x => x.start === start);
+  if (i < 0) return { ok: false, reason: 'missing' };
+  if (start <= today) return { ok: false, reason: 'started' };
+  P.exam.splice(i, 1);
+  return { ok: true };
 }
 
 /* ---------- 하루 정산 ---------- */
@@ -230,27 +291,37 @@ export function weekMissions(c) {
   ];
 }
 
-/** lastEval 부터 어제까지 하루씩 정산. S 를 고치고, 메모를 돌려준다. */
+/**
+ * lastEval 부터 어제까지 하루씩 정산. S 를 고치고, 메모를 돌려준다.
+ * 체력이 0이 되면 잠든다(경험치·단계는 그대로). 잠든 날은 체력이 더 줄지 않는다.
+ * 휴식권을 쓴 날은 체력이 줄지 않는다(느는 건 그대로).
+ */
 export function evaluate(S, today) {
-  if (!S || !S.pet.alive) return [];
+  if (!S) return [];
   S.weeks = S.weeks || {};
   const notes = [];
-  while (S.lastEval < today && S.pet.alive) {
+  while (S.lastEval < today) {
     const d = S.lastEval;
     const L = S.logs[d] || emptyDay();
+    const pass = restPassOn(S, d);
     let delta = 0;
-    if (cappedMinutes(L) >= RULES.exGoal) L.status = 'ex';
+    if (S.pet.sleeping) L.status = 'sleep';
     else {
-      const w = weekId(d);
-      if (!S.rest[w]) { S.rest[w] = d; L.status = 'rest'; } else { L.status = 'miss'; delta -= RULES.missPenalty; }
+      if (cappedMinutes(L) >= RULES.exGoal) L.status = 'ex';
+      else if (pass) L.status = 'pass';
+      else {
+        const w = weekId(d);
+        if (!S.rest[w]) { S.rest[w] = d; L.status = 'rest'; } else { L.status = 'miss'; delta -= RULES.missPenalty; }
+      }
+      if (L.meals.length === 0) delta -= RULES.noMealPenalty;
+      else delta += Math.min(mainBalanced(L), RULES.balancedBonusMax) * RULES.balancedBonus;
+      if (pass) delta = Math.max(delta, 0);
     }
-    if (L.meals.length === 0) delta -= RULES.noMealPenalty;
-    else delta += Math.min(mainBalanced(L), RULES.balancedBonusMax) * RULES.balancedBonus;
     S.logs[d] = L;
     S.pet.hp = clamp(S.pet.hp + delta, 0, 100);
     if (delta < 0) notes.push(`${d.slice(5)} 체력 ${delta}`);
-    if (S.pet.hp <= 0) { S.pet.alive = false; S.pet.diedOn = d; }
-    if (S.pet.alive && isSunday(d)) {
+    if (S.pet.hp <= 0 && !S.pet.sleeping) { S.pet.sleeping = true; notes.push('튼튼몬이 잠들었어요'); }
+    if (isSunday(d)) {
       const w = weekId(d), c = weekCounts(S, w);
       const done = weekMissions(c).filter(m => m.have >= m.need).map(m => m.k);
       const xp = done.length * RULES.weekly.xp;
@@ -326,6 +397,7 @@ export function certExercise(S, today, e, nowMin = null) {
   if (!L.bonus.variety && cats.size >= 2) { L.bonus.variety = true; gain += RULES.varietyXp; parts.push('여러 갈래 운동'); }
 
   entry.xp = gain;
+  const woke = wake(S); // 운동 인증 1번이면 깨어남 (시간 무관)
   const p = S.pet;
   p.hp = clamp(p.hp + Math.round(counted / 6), 0, 100);
   p.train = p.train || { cardio: 0, strength: 0, flex: 0, power: 0 };
@@ -335,7 +407,7 @@ export function certExercise(S, today, e, nowMin = null) {
     p.train[s] += counted * w;
   });
   const grew = addXp(S, gain);
-  return { ok: true, min, counted, gain, parts, flag, grew };
+  return { ok: true, min, counted, gain, parts, flag, grew, woke };
 }
 
 /* ---------- 식단 인증 ---------- */
@@ -367,22 +439,30 @@ export function certMeal(S, today, m) {
     L.bonus.rainbow = true; rainbow = true; gain += RULES.rainbowXp; parts.push('무지개 식단');
   }
   L.meals[L.meals.length - 1].xp = gain;
+  const woke = m.slot !== '간식' && wake(S); // 간식 뺀 끼니면 식품군 수와 상관없이 깨어남
   S.pet.hp = clamp(S.pet.hp + RULES.mealHp[tier], 0, 100);
   const grew = addXp(S, gain);
-  return { ok: true, n: list.length, tier, gain, parts, rainbow, grew };
+  return { ok: true, n: list.length, tier, gain, parts, rainbow, grew, woke };
 }
 
-/** 연속 기록: 어제부터 거꾸로, 운동(또는 휴식일)과 끼니 인증이 둘 다 있는 날 수 (+ 오늘 이미 채웠으면 1) */
+/**
+ * 연속 기록: 어제부터 거꾸로, 운동(또는 휴식일)과 끼니 인증이 둘 다 있는 날 수 (+ 오늘 이미 채웠으면 1).
+ * 휴식권을 쓴 날은 세지도 끊지도 않고 건너뛴다.
+ */
 export function streak(S, today) {
   const good = L => L && L.meals.length > 0 && (L.status === 'ex' || L.status === 'rest');
   let n = 0;
-  for (let d = addDay(today, -1); good(S.logs[d]); d = addDay(d, -1)) n++;
+  for (let d = addDay(today, -1); ; d = addDay(d, -1)) {
+    const L = S.logs[d];
+    if (good(L)) n++;
+    else if (!(L && L.status === 'pass')) break;
+  }
   const T = S.logs[today];
   if (T && T.meals.length > 0 && cappedMinutes(T) >= RULES.exGoal) n++;
   return n;
 }
 
-/* ---------- 예전 저장(v1) 옮기기 ---------- */
+/* ---------- 예전 저장 옮기기 (v1 → v2 → v3) ---------- */
 const V1_STAGES = [0, 15, 60, 140, 260, 420];
 /** 예전 경험치 → 새 경험치 (같은 단계, 같은 비율 위치) */
 export function migrateXp(xp) {
@@ -395,8 +475,18 @@ const V1_KIND = { '근력 운동': '맨몸 근력', '요가·스트레칭': '스
 const V1_GROUP = { '채소·과일': '채소', '단백질': '단백질', '밥·빵·면': '곡류', '우유·유제품': '우유' };
 export function migrate(v) {
   if (!v || !v.pet) return null;
-  if (v.v === SAVE_VERSION) return v;
-  if (v.v !== 1) return null;
+  if (v.v === 1) v = migrateV1(v);
+  if (v.v === 2) v = migrateV2(v);
+  return v.v === SAVE_VERSION ? v : null;
+}
+/** v2 → v3: 소멸(alive:false)은 잠듦으로. 휴식권 칸 추가 */
+function migrateV2(v) {
+  const { alive, diedOn, ...pet } = v.pet;
+  pet.sleeping = alive === false;
+  if (pet.sleeping) pet.hp = 0;
+  return { ...v, v: 3, passes: emptyPasses(), pet };
+}
+function migrateV1(v) {
   const p = v.pet;
   const stats = { ...p.stats };
   const pet = {
@@ -414,5 +504,5 @@ export function migrate(v) {
     if (!logs[d].status) delete logs[d].status;
   });
   if (stageOf(pet.xp) >= 4) pet.branch = pet.line;
-  return { v: SAVE_VERSION, offset: v.offset || 0, logs, rest: v.rest || {}, weeks: {}, lastEval: v.lastEval, pet };
+  return { v: 2, offset: v.offset || 0, logs, rest: v.rest || {}, weeks: {}, lastEval: v.lastEval, pet };
 }

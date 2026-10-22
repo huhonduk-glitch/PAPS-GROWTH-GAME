@@ -1,13 +1,14 @@
 # 튼튼몬 키우기 — 기획서 (Claude Code용)
 
 고등학생이 운동·식단 습관을 기르도록 돕는 다마고치식 육성 게임. 만든 사람: 체육교사 (브랜드 DEOK TT).
-현재 상태: **1단계 끝 · 1.5단계(계통 캐릭터 · 자세한 인증 규칙) (2026-10-13)** — Vite 로 옮겨 파일을 나눔(바닐라 JS, 캔버스 픽셀 그림, localStorage 저장). 테스트(vitest)·PWA(홈 화면 설치·오프라인) 있음.
+현재 상태: **1단계 끝 · 1.5단계(계통 캐릭터 · 자세한 인증 규칙) (2026-10-13) · 고도화 Phase 1(잠듦 · 휴식권) (2026-10-22)** — 고도화 지시서는 `TUNTUN_PLAN.md` — Vite 로 옮겨 파일을 나눔(바닐라 JS, 캔버스 픽셀 그림, localStorage 저장). 테스트(vitest)·PWA(홈 화면 설치·오프라인) 있음.
 
 ### 파일
 | 파일 | 하는 일 |
 |---|---|
 | `index.html` | 화면 틀(글·버튼) |
-| `src/game.js` | **게임 계산만** (단계·인증·하루 정산·능력치). 화면·저장 코드 없음. 규칙 숫자는 `RULES` 한 곳 |
+| `src/game.js` | **게임 계산만** (단계·인증·하루 정산·능력치·잠듦·휴식권). 화면·저장 코드 없음. 기존 규칙 숫자는 `RULES` 한 곳 |
+| `src/config/game.js` | 고도화로 새로 넣는 숫자(깨어날 때 체력, 휴식권 횟수 등) |
 | `src/draw.js` | 픽셀 튼튼몬 그림 (계통 × 단계, 자동 테두리) |
 | `dev/sprites.html` | 그림 모음 미리보기 (개발용) |
 | `src/main.js` | 버튼 연결·화면 그리기 |
@@ -69,21 +70,28 @@
 
 ### 2-4. 하루 정산 (날짜가 바뀔 때)
 - 운동 20분 미만이면 체력 -18 (주 1회는 휴식일로 면제), 끼니 인증 0개면 -12, 균형식 끼니마다 +2(간식 빼고, 최대 3끼).
-- 체력 0 → 소멸(유령). "새 알 받기"로 다시 시작.
+- 체력 0 → **잠듦**(소멸 없음, 경험치·단계 그대로). 잠든 동안 체력이 더 줄지 않음(벌칙 없음). 밤 화면 + Z 그림, 잠든 날 수는 보여주지 않음.
+  깨어나기: 운동 인증 1번(시간 무관) 또는 간식 뺀 끼니 인증 1번(식품군 수 무관) → 체력 `WAKE_UP_HP`(30) + 그 인증의 체력. 경험치·보너스는 평소대로. "다시 만나서 반가워!" 문구.
+- 체력 `LOW_HP_WARN`(20) 이하면 "같이 움직이자" 문구 (그림 기준 50/25 는 그대로).
+- **휴식권**(사유는 받지 않음, 쓰는 날은 체력이 줄지 않음 · 느는 건 그대로 · 주 1회 휴식일을 쓰지 않음 · 연속 기록은 건너뜀, 이불 덮은 그림):
+  시험기간 휴식권 학기당 `EXAM_REST_PER_TERM`(2)번, 한 번에 `EXAM_REST_MAX_DAYS`(7)일까지, 시작일은 오늘 이후, 시작 전이면 취소하고 횟수 돌려받음 (3~8월 1학기, 9월~2월 2학기) ·
+  아픈 날 휴식권 한 달 `SICK_REST_PER_MONTH`(3)번, 오늘 하루. 잠든 동안은 못 씀. 숫자는 `src/config/game.js`.
 - 연속 기록 = 운동(또는 휴식일)과 끼니 인증이 둘 다 있는 날이 이어진 수.
 - 체험용 "하루 넘기기" 버튼(offset)이 있다. 학생 배포판에서는 숨길 것. 날을 넘긴 동안은 시각 검사를 안 함.
 
-## 3. 저장 구조 (localStorage `tteuntteunmon.v1` · 안의 `v:2`)
+## 3. 저장 구조 (localStorage `tteuntteunmon.v1` · 안의 `v:3`)
 ```
-{ v:2, offset, lastEval:'YYYY-MM-DD', rest:{주시작일:쓴날}, weeks:{주시작일:{hard,strength,flex,minutes,rainbow,done[],xp}},
-  pet:{ name, line, branch, height, stats:{cardio,strength,flex,power}, base:{…}, train:{…분}, hp, xp, alive, born, diedOn },
-  logs:{ 'YYYY-MM-DD': { status:'ex'|'rest'|'miss', bonus:{goalPlus,variety,rainbow},
+{ v:3, offset, lastEval:'YYYY-MM-DD', rest:{주시작일:쓴날}, weeks:{주시작일:{hard,strength,flex,minutes,rainbow,done[],xp}},
+  passes:{ exam:[{start,end}], sick:['YYYY-MM-DD'] },
+  pet:{ name, line, branch, height, stats:{cardio,strength,flex,power}, base:{…}, train:{…분}, hp, xp, sleeping, born },
+  logs:{ 'YYYY-MM-DD': { status:'ex'|'rest'|'pass'|'sleep'|'miss', bonus:{goalPlus,variety,rainbow},
     ex:[{kind,cat,min,int,start,amount,warm,proof,photo,photoOk,flag,xp,at}],
     meals:[{slot,place,groups[],drink,photo,photoOk,xp,at}] } } }
 ```
 - 예전 `v:1` 저장은 불러올 때 `migrate()` 가 옮김 (경험치는 같은 단계가 되게 늘림, 계통은 그때 능력치로).
+- `v:2` → `v:3`: 소멸(`alive:false`)은 잠듦(`sleeping:true`, 체력 0)으로, `diedOn` 은 지우고 `passes` 칸 추가.
 - 사진은 200px JPEG(dataURL)로 줄여 저장한다.
-- 그림 확인: `npm run dev` → `/dev/sprites.html` (단계 × 계통 모음 · `?hp=20` 지친 모습 · `?cheer` 기쁜 모습). 배포에는 안 들어감.
+- 그림 확인: `npm run dev` → `/dev/sprites.html` (단계 × 계통 모음 · `?hp=20` 지친 모습 · `?cheer` 기쁜 모습 · 맨 아래 잠듦·휴식권·체력 20 비교 줄). 배포에는 안 들어감.
 
 ## 4. 앞으로 할 일 (단계)
 | 단계 | 내용 |

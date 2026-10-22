@@ -3,7 +3,9 @@ import {
   RULES, STAGES, stageOf, gradeToStat, statsFromInputs, lineFromStats, branchFromTraining, speciesName,
   newPet, newState, evaluate, certExercise, certMeal, checkPlausible, weekCounts, streak, remeasure,
   migrate, migrateXp, addDay, daysBetween, weekId, todayKey, toMin,
+  termOf, passesLeft, useSickPass, useExamPass, cancelExamPass, restPassOn,
 } from '../src/game.js';
+import { EXAM_REST_MAX_DAYS, EXAM_REST_PER_TERM, SICK_REST_PER_MONTH } from '../src/config/game.js';
 import { load, save, clear, KEY } from '../src/storage.js';
 
 const D0 = '2026-10-12'; // 월요일
@@ -228,12 +230,16 @@ describe('하루 정산', () => {
     expect(evaluate(S, addDay(D0, 1))).toEqual(['10-12 체력 -12']);
     expect(S.pet.hp).toBe(hp - 12);
   });
-  it('체력 0이면 소멸, 그 뒤로는 정산 멈춤', () => {
-    const S = base(); S.pet.hp = 20;
-    evaluate(S, addDay(D0, 10));
-    expect(S.pet.alive).toBe(false);
-    expect(S.pet.diedOn).toBe(addDay(D0, 1));
-    expect(S.lastEval).toBe(addDay(D0, 2));
+  it('체력 0이면 잠듦 (소멸 없음), 경험치·단계 그대로, 잠든 동안 벌칙 없음', () => {
+    const S = base(); S.pet.hp = 20; S.pet.xp = 150;
+    const notes = evaluate(S, addDay(D0, 10));
+    expect(S.pet.sleeping).toBe(true);
+    expect(S.pet.hp).toBe(0);
+    expect(S.pet.xp).toBe(150);
+    expect(notes).toContain('튼튼몬이 잠들었어요');
+    expect(notes[notes.length - 1]).toBe('튼튼몬이 잠들었어요'); // 잠든 뒤로는 체력 감소 메모 없음
+    expect(S.logs[addDay(D0, 5)].status).toBe('sleep');
+    expect(S.lastEval).toBe(addDay(D0, 10)); // 정산은 계속 진행
   });
   it('굶기를 보상하지 않음', () => {
     const a = base(), b = base();
@@ -255,6 +261,134 @@ describe('하루 정산', () => {
     expect(notes).toContain('주간 미션 3개 +30');
     expect(S.pet.xp).toBe(xp + 30);
     expect(S.weeks[D0].done).toEqual(['hard', 'strength', 'flex']);
+  });
+});
+
+describe('잠듦 · 깨어나기', () => {
+  const asleep = () => { const S = base(); S.pet.xp = 150; S.pet.hp = 0; S.pet.sleeping = true; return S; };
+  it('운동 인증 1번이면 깨어남: 체력 30 + 그 운동 체력, 경험치는 평소대로', () => {
+    const S = asleep(), awake = base(); awake.pet.xp = 150; awake.pet.hp = 30;
+    const r = ex(S, D0, 6), r2 = ex(awake, D0, 6);
+    expect(r.woke).toBe(true);
+    expect(S.pet.sleeping).toBe(false);
+    expect(S.pet.hp).toBe(30 + Math.round(6 / 6));
+    expect(r.gain).toBe(r2.gain);
+    expect(S.pet.xp).toBe(awake.pet.xp);
+  });
+  it('간식 뺀 끼니 인증이면 식품군 수와 상관없이 깨어남', () => {
+    const S = asleep();
+    const r = meal(S, D0, '아침', []);
+    expect(r.woke).toBe(true);
+    expect(S.pet.hp).toBe(30 + RULES.mealHp.plain);
+  });
+  it('아침 · 점심 · 저녁 끼니 인증 모두 깨움', () => {
+    ['아침', '점심', '저녁'].forEach(slot => {
+      const S = asleep();
+      const r = meal(S, D0, slot, ['곡류']);
+      expect(r.woke).toBe(true);
+      expect(S.pet.sleeping).toBe(false);
+      expect(S.pet.hp).toBe(30 + RULES.mealHp.plain);
+    });
+  });
+  it('간식은 깨우지 않음', () => {
+    const S = asleep();
+    const r = meal(S, D0, '간식', BAL);
+    expect(r.ok).toBe(true);
+    expect(r.woke).toBe(false);
+    expect(S.pet.sleeping).toBe(true);
+  });
+  it('깨어 있을 때는 woke 아님', () => {
+    expect(ex(base(), D0, 10).woke).toBe(false);
+  });
+  it('잠든 날도 주간 미션 정산은 그대로', () => {
+    const S = asleep();
+    expect(() => evaluate(S, addDay(D0, 7))).not.toThrow();
+    expect(S.weeks[D0]).toBeTruthy();
+  });
+});
+
+describe('휴식권', () => {
+  it('학기: 3~8월 1학기, 9월~다음 해 2월 2학기', () => {
+    expect(termOf('2026-03-01')).toBe('2026-1');
+    expect(termOf('2026-08-31')).toBe('2026-1');
+    expect(termOf('2026-09-01')).toBe('2026-2');
+    expect(termOf('2027-02-28')).toBe('2026-2');
+  });
+  it('아픈 날 휴식권: 그날 체력 감소 없음 (운동 0분 · 끼니 0개여도)', () => {
+    const S = base(); S.rest[weekId(D0)] = 'x'; // 주 1회 휴식일은 이미 씀
+    expect(useSickPass(S, D0).ok).toBe(true);
+    evaluate(S, addDay(D0, 1));
+    expect(S.pet.hp).toBe(70);
+    expect(S.logs[D0].status).toBe('pass');
+  });
+  it('휴식권 날에도 늘어나는 체력은 그대로', () => {
+    const S = base();
+    useSickPass(S, D0); meal(S, D0, '점심', BAL);
+    const hp = S.pet.hp;
+    evaluate(S, addDay(D0, 1));
+    expect(S.pet.hp).toBe(hp + RULES.balancedBonus);
+  });
+  it('휴식권 날은 주 1회 휴식일을 쓰지 않음', () => {
+    const S = base();
+    useSickPass(S, D0);
+    evaluate(S, addDay(D0, 2));
+    expect(S.logs[addDay(D0, 1)].status).toBe('rest');
+  });
+  it(`아픈 날 휴식권은 한 달 ${SICK_REST_PER_MONTH}번, 같은 날 두 번 안 됨, 다음 달엔 다시`, () => {
+    const S = base();
+    expect(useSickPass(S, D0).ok).toBe(true);
+    expect(useSickPass(S, D0).reason).toBe('already');
+    for (let i = 1; i < SICK_REST_PER_MONTH; i++) expect(useSickPass(S, addDay(D0, i)).ok).toBe(true);
+    expect(useSickPass(S, addDay(D0, 5)).reason).toBe('none');
+    expect(passesLeft(S, D0).sick).toBe(0);
+    expect(useSickPass(S, '2026-11-02').ok).toBe(true);
+  });
+  it(`시험기간 휴식권: 최대 ${EXAM_REST_MAX_DAYS}일 동안 감소 없음, 끝나면 다시 감소`, () => {
+    const S = base();
+    const r = useExamPass(S, D0, D0, EXAM_REST_MAX_DAYS);
+    expect(r).toMatchObject({ ok: true, end: addDay(D0, EXAM_REST_MAX_DAYS - 1) });
+    evaluate(S, addDay(D0, EXAM_REST_MAX_DAYS));
+    expect(S.pet.hp).toBe(70);
+    evaluate(S, addDay(D0, EXAM_REST_MAX_DAYS + 1));
+    expect(S.pet.hp).toBeLessThan(70);
+  });
+  it('시험기간 휴식권 막는 것: 지난 날 시작 · 기간 초과 · 겹침', () => {
+    const S = base();
+    expect(useExamPass(S, D0, addDay(D0, -1), 3).reason).toBe('start');
+    expect(useExamPass(S, D0, D0, EXAM_REST_MAX_DAYS + 1).reason).toBe('days');
+    expect(useExamPass(S, D0, D0, 0).reason).toBe('days');
+    expect(useExamPass(S, D0, addDay(D0, 3), 3).ok).toBe(true);
+    expect(useExamPass(S, D0, D0, 4).reason).toBe('overlap');
+  });
+  it(`시험기간 휴식권은 학기당 ${EXAM_REST_PER_TERM}번, 다음 학기엔 다시`, () => {
+    const S = base();
+    for (let i = 0; i < EXAM_REST_PER_TERM; i++) expect(useExamPass(S, D0, addDay(D0, i * 10), 3).ok).toBe(true);
+    expect(useExamPass(S, D0, addDay(D0, 50), 3).reason).toBe('none'); // 12월 = 같은 2학기
+    expect(useExamPass(S, D0, '2027-03-02', 3).ok).toBe(true);
+  });
+  it('시험기간 휴식권: 시작일 전이면 취소하고 횟수 돌려줌, 시작했으면 취소 안 됨', () => {
+    const S = base();
+    useExamPass(S, D0, addDay(D0, 3), 3);
+    useExamPass(S, D0, D0, 2);
+    expect(passesLeft(S, D0).exam).toBe(0);
+    expect(cancelExamPass(S, D0, D0).reason).toBe('started');
+    expect(cancelExamPass(S, D0, addDay(D0, 9)).reason).toBe('missing');
+    expect(cancelExamPass(S, D0, addDay(D0, 3)).ok).toBe(true);
+    expect(passesLeft(S, D0).exam).toBe(1);
+    expect(restPassOn(S, addDay(D0, 4))).toBeNull();
+  });
+  it('잠든 동안에는 휴식권을 쓰지 않음', () => {
+    const S = base(); S.pet.sleeping = true;
+    expect(useSickPass(S, D0).reason).toBe('sleeping');
+    expect(useExamPass(S, D0, D0, 3).reason).toBe('sleeping');
+  });
+  it('휴식권 날은 연속 기록을 끊지 않음', () => {
+    const S = base();
+    ex(S, D0, 20); meal(S, D0, '점심', BAL);
+    useSickPass(S, addDay(D0, 1));
+    ex(S, addDay(D0, 2), 20); meal(S, addDay(D0, 2), '점심', BAL);
+    evaluate(S, addDay(D0, 3));
+    expect(streak(S, addDay(D0, 3))).toBe(2);
   });
 });
 
@@ -285,7 +419,10 @@ describe('예전 저장(v1) 옮기기', () => {
   };
   it('계통·경험치·기록을 새 모양으로', () => {
     const S = migrate(JSON.parse(JSON.stringify(v1)));
-    expect(S.v).toBe(2);
+    expect(S.v).toBe(3);
+    expect(S.pet.sleeping).toBe(false);
+    expect(S.pet).not.toHaveProperty('alive');
+    expect(S.passes).toEqual({ exam: [], sick: [] });
     expect(S.pet.line).toBe('wind');
     expect(stageOf(S.pet.xp)).toBe(2); // 예전 꼬마 → 지금도 꼬마
     expect(S.logs[D0].ex[0]).toMatchObject({ kind: '맨몸 근력', cat: 'strength' });
@@ -294,6 +431,23 @@ describe('예전 저장(v1) 옮기기', () => {
   it('예전 단계 그대로', () => {
     [[0, 0], [14, 0], [15, 1], [59, 1], [140, 3], [260, 4], [420, 5], [500, 5]].forEach(([x, st]) => expect(stageOf(migrateXp(x))).toBe(st));
     expect(migrateXp(15)).toBe(STAGES[1][0]);
+  });
+  it('v2 소멸 데이터 → v3 잠듦 (경험치·기록 그대로)', () => {
+    const v2 = { v: 2, offset: 0, lastEval: addDay(D0, 3), rest: {}, weeks: {}, logs: { [D0]: { ex: [], meals: [], bonus: {} } },
+      pet: { name: '몬', line: 'wind', branch: null, height: 160, stats: {}, base: {}, train: {}, hp: 0, xp: 300, alive: false, born: D0, diedOn: addDay(D0, 2) } };
+    const S = migrate(v2);
+    expect(S.v).toBe(3);
+    expect(S.pet).toMatchObject({ sleeping: true, hp: 0, xp: 300 });
+    expect(S.pet).not.toHaveProperty('alive');
+    expect(S.pet).not.toHaveProperty('diedOn');
+    expect(S.logs[D0]).toBeTruthy();
+    evaluate(S, addDay(D0, 6)); // 그동안 밀린 날도 벌칙 없이 정산
+    expect(S.pet.hp).toBe(0);
+    expect(ex(S, addDay(D0, 6), 10).woke).toBe(true);
+  });
+  it('v2 살아 있던 데이터 → 깨어 있음', () => {
+    const S = migrate({ v: 2, lastEval: D0, logs: {}, rest: {}, pet: { hp: 40, xp: 10, alive: true } });
+    expect(S.pet).toMatchObject({ sleeping: false, hp: 40 });
   });
   it('모르는 버전은 버림', () => {
     expect(migrate({ v: 9, pet: {} })).toBeNull();
@@ -323,4 +477,8 @@ describe('저장', () => {
 it('RULES 숫자가 기획서 2장과 같음', () => {
   expect(RULES).toMatchObject({ exDailyCap: 90, exGoal: 20, exGoalPlus: 60, missPenalty: 18, noMealPenalty: 12, balancedMin: 3, balancedBonus: 2, balancedBonusMax: 3, startHp: 70 });
   expect(STAGES.map(s => s[0])).toEqual([0, 20, 120, 400, 900, 1600]);
+});
+it('config/game.js 숫자가 지시서 Phase 1 초기값과 같음', async () => {
+  const C = await import('../src/config/game.js');
+  expect(C).toMatchObject({ WAKE_UP_HP: 30, LOW_HP_WARN: 20, EXAM_REST_MAX_DAYS: 7, EXAM_REST_PER_TERM: 2, SICK_REST_PER_MONTH: 3 });
 });

@@ -7,6 +7,7 @@ export const W = 72, H = 54;
 const GROUND = 50;
 const INK = [44, 40, 60], BG = [185, 201, 160];
 const WHITE = [255, 255, 255], CREAM = [255, 246, 228], PINK = [255, 150, 168], MOUTH = [150, 60, 78];
+const NIGHT = [36, 44, 92], BLANKET = [120, 170, 228], BLANKET_L = [168, 204, 244];
 const GOLD = [255, 210, 80], GOLD_D = [214, 150, 40], WING_S = [214, 226, 244], WING_O = [128, 148, 190];
 const mix = (a, b, k) => a.map((v, i) => v + (b[i] - v) * k);
 
@@ -45,12 +46,15 @@ const shade = (pal, rx, ry, soft) => (dx, dy, k) =>
 
 /* ---------- 얼굴 ---------- */
 function face(L, cx, ey, gap, size, mood) {
-  const { hp, cheer, blink } = mood;
+  const { hp, cheer, blink, sleep } = mood;
   const ew = size >= 3 ? 3 : 2, eh = size + 1;
   [-1, 1].forEach(s => {
     const x0 = s < 0 ? cx - gap - ew + 1 : cx + gap; // 눈 왼쪽 끝
     const mid = x0 + (ew - 1) / 2;
-    if (cheer) { // 웃는 눈 ^^
+    if (sleep) { // 푹 잠든 눈 ‿ (체력 낮을 때 감은 눈 — 일자 — 과 다름)
+      L.set(x0, ey + eh - 2, INK); L.set(x0 + ew - 1, ey + eh - 2, INK);
+      for (let i = ew === 3 ? 1 : 0; i < (ew === 3 ? 2 : ew); i++) L.set(x0 + i, ey + eh - 1, INK);
+    } else if (cheer) { // 웃는 눈 ^^
       L.set(x0, ey + 2, INK); L.set(mid, ey + 1, INK); L.set(x0 + ew - 1, ey + 2, INK);
       if (ew === 3) { L.set(x0 + 0.6, ey + 1, INK); }
     } else if (blink || hp < 25) { // 감은 눈
@@ -63,10 +67,11 @@ function face(L, cx, ey, gap, size, mood) {
       L.set(x0, ey, WHITE);
       if (ew === 3) { L.set(x0 + 1, ey, WHITE); L.set(x0, ey + 1, WHITE); }
     }
-    if (hp >= 40) { const bx = s < 0 ? x0 - 1 : x0 + ew - 1; L.set(bx, ey + eh, PINK); L.set(bx + 1, ey + eh, PINK); }
+    if (hp >= 40 || sleep) { const bx = s < 0 ? x0 - 1 : x0 + ew - 1; L.set(bx, ey + eh, PINK); L.set(bx + 1, ey + eh, PINK); }
   });
   const my = ey + eh;
-  if (cheer) { L.set(cx - 1, my, MOUTH); L.set(cx, my, MOUTH); L.set(cx + 1, my, MOUTH); L.set(cx, my + 1, PINK); }
+  if (sleep) L.set(cx, my + 1, MOUTH); // 작은 입 o
+  else if (cheer) { L.set(cx - 1, my, MOUTH); L.set(cx, my, MOUTH); L.set(cx + 1, my, MOUTH); L.set(cx, my + 1, PINK); }
   else if (hp >= 50) { L.set(cx - 1, my, MOUTH); L.set(cx, my + 1, MOUTH); L.set(cx + 1, my, MOUTH); }
   else if (hp >= 25) { L.set(cx - 1, my + 1, MOUTH); L.set(cx, my + 1, MOUTH); L.set(cx + 1, my + 1, MOUTH); }
   else { L.set(cx - 1, my + 1, MOUTH); L.set(cx, my, MOUTH); L.set(cx + 1, my + 1, MOUTH); }
@@ -123,9 +128,9 @@ function gear(A, line, cx, topY, r, big) {
 }
 
 /* ---------- 단계별 몸 ---------- */
-function drawEgg(F, pet, t, preview) {
+function drawEgg(F, pet, t, preview, still) {
   const pal = palette(pet.line, 0);
-  const shake = pet.xp >= 12 ? 2 : 1;
+  const shake = still ? 0 : pet.xp >= 12 ? 2 : 1;
   const wob = Math.sin(t / (preview ? 420 : 240)) * shake;
   const cx = 36 + Math.round(wob * 0.6), cy = GROUND - 12;
   const E = new Layer();
@@ -218,6 +223,7 @@ function drawChibi(F, pet, t, mood, pal, s, st) {
 
 function shadow(F, cx, r) { for (let dx = -r + 1; dx <= r - 1; dx++) if (!F.get(cx + dx, GROUND + 1)) F.set(cx + dx, GROUND + 1, mix(BG, INK, 0.3)); }
 
+/** 예전 소멸(유령) 그림 — 소멸이 잠듦으로 바뀌어 지금은 안 씀. 지우지 말고 둔다 */
 function drawGhost(F, pet, t) {
   const y = 24 + Math.sin(t / 600) * 2, cx = 36;
   const G = new Layer();
@@ -230,6 +236,25 @@ function drawGhost(F, pet, t) {
   for (let i = 0; i < 4; i++) { const sy = (t / 60 + i * 11) % 44; F.set(10 + i * 16, GROUND - sy, mix(BG, INK, 0.4)); }
 }
 
+/** 잠듦: 위로 떠오르는 Z */
+function zzz(L, t) {
+  for (let i = 0; i < 3; i++) {
+    const ph = (t / 1400 + i / 3) % 1, n = ph < 0.4 ? 4 : 5;
+    const x0 = Math.round(46 + ph * 12), y0 = Math.round(24 - ph * 18);
+    for (let k = 0; k < n; k++) { L.set(x0 + k, y0, WHITE); L.set(x0 + k, y0 + n - 1, WHITE); }
+    for (let k = 1; k < n - 1; k++) L.set(x0 + n - 1 - k, y0 + k, WHITE);
+  }
+}
+/** 휴식권 쓰는 중: 체크무늬 이불 */
+function blanket(F, cx, top) {
+  const B = new Layer();
+  for (let y = top; y <= GROUND; y++) for (let x = cx - 17; x <= cx + 17; x++) {
+    if (y === top && Math.abs(x - cx) > 15) continue;
+    B.set(x, y, y <= top + 1 ? CREAM : (Math.floor((x - cx + 40) / 4) + Math.floor((y - top) / 4)) % 2 ? BLANKET : BLANKET_L);
+  }
+  B.outline(mix(BLANKET, INK, 0.55)).onto(F);
+}
+
 function sparkles(F, cx, cy, r, t) {
   for (let i = 0; i < 3; i++) {
     const a = t / 500 + i * 2.1, sx = cx + Math.cos(a) * (r + 7), sy = cy + Math.sin(a) * (r * 0.6) - 2;
@@ -240,25 +265,32 @@ function sparkles(F, cx, cy, r, t) {
   }
 }
 
-/** pet = {line,branch,xp,hp,alive,height} · t = 시각(ms) · preview = 만들기 전 미리보기 · cheer = 기뻐하는 중 */
-export function draw(ctx, pet, t, { preview = false, cheer = false } = {}) {
-  const F = new Layer();
+/**
+ * pet = {line,branch,xp,hp,sleeping,height} · t = 시각(ms) · preview = 만들기 전 미리보기 · cheer = 기뻐하는 중
+ * resting = 휴식권 쓰는 중(이불). 잠듦은 밤 화면 + Z 로, 체력 낮은 모습과 헷갈리지 않게 한다.
+ */
+export function draw(ctx, pet, t, { preview = false, cheer = false, resting = false } = {}) {
+  const F = new Layer(), top = new Layer();
   for (let x = 0; x < W; x += 2) F.set(x, GROUND + 1, mix(BG, INK, 0.2)); // 땅
   const st = stageOf(pet.xp);
-  if (!pet.alive) drawGhost(F, pet, t);
-  else if (st === 0) drawEgg(F, pet, t, preview);
+  const sleep = !preview && !!pet.sleeping;
+  resting = resting && !sleep;
+  if (st === 0) drawEgg(F, pet, t, preview, sleep || resting);
   else {
-    const weak = clamp((50 - pet.hp) / 50, 0, 1);
-    const mood = { hp: pet.hp, cheer, weak, blink: t % 3400 < 140 };
+    const weak = sleep ? 0.2 : clamp((50 - pet.hp) / 50, 0, 1);
+    const still = sleep ? 1 : resting ? Math.max(weak, 0.6) : weak; // 움직임 줄이기 (잠듦 = 숨 쉬는 정도)
+    const mood = { hp: pet.hp, cheer: cheer && !sleep, weak: still, sleep, blink: t % 3400 < 140 };
     const pal = palette(st >= 4 ? formLine(pet) : pet.line, weak);
     const s = 0.92 + clamp((pet.height - 150) / 40, 0, 1) * 0.16;
     if (st === 1) drawBaby(F, pet, t, mood, pal, s);
     else if (st === 2) drawKid(F, pet, t, mood, pal, s);
     else drawChibi(F, pet, t, mood, pal, s, st);
-    if (weak > 0.4) { const sy = (t / 120) % 6; F.set(48, 20 + sy, [90, 150, 230]); F.set(48, 21 + sy, [90, 150, 230]); }
-    if (pet.hp > 85 || st === 5 || cheer) sparkles(F, 36, 30, 14, t);
+    if (!sleep && !resting && weak > 0.4) { const sy = (t / 120) % 6; F.set(48, 20 + sy, [90, 150, 230]); F.set(48, 21 + sy, [90, 150, 230]); }
+    if (!sleep && (pet.hp > 85 || st === 5 || cheer)) sparkles(F, 36, 30, 14, t);
   }
+  if (resting) blanket(F, 36, GROUND - [7, 4, 5, 9, 9, 9][st]); // 얼굴은 가리지 않게
+  if (sleep) zzz(top, t);
   const img = ctx.createImageData(W, H);
-  F.p.forEach((c, i) => { const col = c || BG; img.data[i * 4] = col[0]; img.data[i * 4 + 1] = col[1]; img.data[i * 4 + 2] = col[2]; img.data[i * 4 + 3] = 255; });
+  F.p.forEach((c, i) => { const col = top.p[i] || (sleep ? mix(c || BG, NIGHT, 0.45) : c || BG); img.data[i * 4] = col[0]; img.data[i * 4 + 1] = col[1]; img.data[i * 4 + 2] = col[2]; img.data[i * 4 + 3] = 255; });
   ctx.putImageData(img, 0, 0);
 }

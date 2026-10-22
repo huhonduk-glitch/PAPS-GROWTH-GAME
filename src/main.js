@@ -5,7 +5,9 @@ import {
   SCHOOL_LUNCH, SPECIES, RULES, clamp, addDay, daysBetween, todayKey, keyOf, fromMin, stageOf, kindOf, exMinutes, cappedMinutes,
   balancedCount, dayGroups, statsFromInputs, lineFromStats, branchFromTraining, speciesName, newPet, newState, evaluate,
   certExercise, certMeal, weekId, weekCounts, weekMissions, streak, remeasure,
+  restPassOn, passesLeft, useSickPass, useExamPass, cancelExamPass,
 } from './game.js';
+import { LOW_HP_WARN, EXAM_REST_MAX_DAYS } from './config/game.js';
 import { draw } from './draw.js';
 import { load, save as store, clear } from './storage.js';
 
@@ -99,7 +101,8 @@ function onCertEx() {
   const r = certExercise(S, today(), e, nowMin());
   if (!r.ok) { toast(EX_FAIL[r.reason]); return; }
   save(); closePanels(); render();
-  if (r.grew) say(`${S.pet.name}(이)가 ${speciesName(S.pet)}(으)로 자랐어요!`, true);
+  if (r.woke) welcome();
+  else if (r.grew) say(`${S.pet.name}(이)가 ${speciesName(S.pet)}(으)로 자랐어요!`, true);
   else if (r.counted === 0) say(`오늘은 ${RULES.exDailyCap}분을 다 채웠어요. 이제 푹 쉬어요.`);
   else say(`${sel.ex} ${r.min}분 인증! 경험치 +${r.gain}${r.flag ? ' (확인 필요)' : ''}`);
   photos.ex = null; $('exPrev').hidden = true; $('exPhoto').value = '';
@@ -133,7 +136,8 @@ function onCertMeal() {
   const r = certMeal(S, today(), mealInput());
   if (!r.ok) { toast(`${sel.slot}은 이미 인증했어요.`); return; }
   save(); closePanels(); render();
-  if (r.grew) say(`${S.pet.name}(이)가 ${speciesName(S.pet)}(으)로 자랐어요!`, true);
+  if (r.woke) welcome();
+  else if (r.grew) say(`${S.pet.name}(이)가 ${speciesName(S.pet)}(으)로 자랐어요!`, true);
   else if (r.rainbow) say(`무지개 식단 완성! 오늘 식품군 5가지를 다 먹었어요. +${r.gain}`, true);
   else say(r.tier === 'plain' ? `${sel.slot} 인증! 다음엔 한 가지 더 곁들여 봐요. +${r.gain}` : `${sel.slot} ${r.tier === 'great' ? '아주 좋은 한 끼' : '균형식'} 인증! 경험치 +${r.gain}`);
   photos.meal = null; $('mealPrev').hidden = true; $('mealPhoto').value = '';
@@ -193,9 +197,13 @@ function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('sh
 let cheerUntil = 0;
 function say(m, cheer) { $('lcdMsg').textContent = m; if (cheer) cheerUntil = performance.now() + 2500; }
 
+/** 잠에서 깨어났을 때 — 처벌보다 반겨 주기 */
+function welcome() { say(`다시 만나서 반가워! ${S.pet.name}(이)가 깨어났어요. 오늘도 같이 해요!`, true); }
 function moodLine() {
   const p = S.pet; const L = S.logs[today()];
-  if (!p.alive) return `${p.name}(이)가 기운이 다 빠져 소멸했어요… 함께한 날 ${daysBetween(p.born, p.diedOn) + 1}일.`;
+  if (p.sleeping) return `쿨쿨… ${p.name}(이)가 자고 있어요. 운동 한 번이면 깨어나요! (간식 말고 끼니 인증도 좋아요)`;
+  if (restPassOn(S, today())) return `푹 쉬고 와요. 오늘은 체력이 줄지 않아요.`;
+  if (p.hp <= LOW_HP_WARN) return `졸려요… 같이 움직이자! 조금만 운동해도 힘이 나요.`;
   if (p.hp < 25) return '너무 힘이 없어요… 오늘 꼭 움직이고 잘 챙겨 먹어 주세요.';
   if (p.hp < 50) return `조금 시들시들해요. 운동 ${RULES.exGoal}분이면 기운이 나요.`;
   const ex = exMinutes(L), meals = L ? L.meals.length : 0;
@@ -206,7 +214,7 @@ function moodLine() {
 }
 function render() {
   const has = !!S;
-  $('keys').hidden = !has || !S.pet.alive; $('demo').hidden = !has;
+  $('keys').hidden = !has; $('demo').hidden = !has;
   if (!has) {
     $('setup').hidden = false; setupMode = 'new'; openSetupLabels();
     $('petName').textContent = '새 알'; $('stageTxt').textContent = '알'; $('dayTxt').textContent = 'DAY 1'; setBars(RULES.startHp, 0); renderLineBox(); return;
@@ -214,15 +222,9 @@ function render() {
   const p = S.pet;
   $('petName').textContent = p.name;
   $('stageTxt').textContent = speciesName(p);
-  $('dayTxt').textContent = `DAY ${daysBetween(p.born, p.alive ? today() : p.diedOn) + 1}`;
+  $('dayTxt').textContent = `DAY ${daysBetween(p.born, today()) + 1}`;
   setBars(p.hp, p.xp);
   if (performance.now() > cheerUntil) $('lcdMsg').textContent = moodLine();
-  if (!p.alive) {
-    $('lcdMsg').textContent = moodLine() + ' ';
-    const b = document.createElement('button');
-    b.className = 'btn small'; b.style.marginTop = '6px'; b.textContent = '새 알 받기'; b.onclick = restart;
-    $('lcdMsg').appendChild(b);
-  }
 }
 function openSetupLabels() { $('setupTitle').textContent = '내 튼튼몬 만들기'; $('nameRow').hidden = false; $('bCreate').textContent = '알 받기'; $('bSetupCancel').hidden = true; }
 function setBars(hp, xp) {
@@ -274,6 +276,53 @@ function renderInfo() {
     D.meals.forEach(m => items.push([m.at, `<div class="logi">${img(m.photo)}<span class="tag">${k.slice(5)}</span><span>${esc(m.slot)} · ${esc(m.place || '')} · ${esc((m.groups || []).join(', ') || '기록만')}</span><span class="xp">${m.xp ? '+' + m.xp : ''}</span></div>`]));
   });
   $('log').innerHTML = items.length ? items.sort((a, b) => b[0] - a[0]).map(x => x[1]).join('') : '<p class="hint">아직 인증 기록이 없어요.</p>';
+  renderPasses();
+}
+
+/* ---------- 휴식권 (사유는 묻지 않음) ---------- */
+const PASS_FAIL = {
+  sleeping: '잠든 동안에는 쓸 수 없어요. 먼저 깨워 주세요.',
+  already: '오늘은 이미 휴식권을 쓰고 있어요.',
+  none: '남은 휴식권이 없어요.',
+  start: '시작 날짜는 오늘이나 그 뒤로 골라 주세요.',
+  days: `1~${EXAM_REST_MAX_DAYS}일 사이로 골라 주세요.`,
+  overlap: '이미 정해 둔 기간과 겹쳐요.',
+};
+/** 잘못 누르지 않게 두 번 눌러야 씀 */
+function twoTap(btn, fn) {
+  const label = btn.textContent;
+  btn.onclick = () => {
+    if (btn.dataset.armed) { fn(); return; }
+    btn.dataset.armed = '1'; btn.textContent = '한 번 더 누르면 써요';
+    setTimeout(() => { delete btn.dataset.armed; btn.textContent = label; }, 3000);
+  };
+}
+function renderPasses() {
+  const t = today(), left = passesLeft(S, t), on = restPassOn(S, t), asleep = S.pet.sleeping;
+  const booked = S.passes.exam.filter(x => x.end >= t)
+    .map(x => `<div class="booked"><span>${x.start.slice(5)} ~ ${x.end.slice(5)}${x.start <= t ? ' (쉬는 중)' : ''}</span>${x.start > t ? `<button class="btn ghost small" data-cancel="${x.start}">취소</button>` : ''}</div>`).join('');
+  let days = '';
+  for (let i = 1; i <= EXAM_REST_MAX_DAYS; i++) days += `<option value="${i}"${i === EXAM_REST_MAX_DAYS ? ' selected' : ''}>${i}일</option>`;
+  $('passBox').innerHTML = (on ? `<p class="note">오늘은 ${on === 'exam' ? '시험기간' : '아픈 날'} 휴식권을 쓰는 중이에요. 체력이 줄지 않아요.</p>` : '')
+    + `<div class="pass"><div><b>아픈 날 휴식권</b><span class="hint">오늘 하루 체력이 줄지 않아요 · 이번 달 ${left.sick}번 남음</span></div>`
+    + `<button class="btn small" id="bSick"${asleep || on || left.sick <= 0 ? ' disabled' : ''}>오늘 쉬기</button></div>`
+    + `<div class="pass"><div><b>시험기간 휴식권</b><span class="hint">최대 ${EXAM_REST_MAX_DAYS}일 동안 체력이 줄지 않아요 · 이번 학기 ${left.exam}번 남음 · 시작 전이면 취소할 수 있어요</span></div>`
+    + booked
+    + `<div class="row"><label>시작 날짜<input id="examStart" type="date" min="${t}" value="${t}"></label><label>며칠 동안<select id="examDays">${days}</select></label></div>`
+    + `<button class="btn small" id="bExam"${asleep ? ' disabled' : ''}>시험기간 휴식권 쓰기</button></div>`
+    + `<p class="hint">${asleep ? '잠든 동안에는 휴식권이 필요 없어요. 먼저 깨워 주세요.' : '쉬는 이유는 적지 않아요. 주 1회 휴식일은 따로 그대로 있어요.'}</p>`;
+  twoTap($('bSick'), () => usedPass(useSickPass(S, today())));
+  twoTap($('bExam'), () => usedPass(useExamPass(S, today(), $('examStart').value, Number($('examDays').value))));
+  $('passBox').querySelectorAll('[data-cancel]').forEach(b => twoTap(b, () => {
+    const r = cancelExamPass(S, today(), b.dataset.cancel);
+    if (!r.ok) { toast('이미 시작한 기간은 취소할 수 없어요.'); renderPasses(); return; }
+    save(); render(); renderPasses(); toast('취소했어요. 휴식권 횟수를 돌려받았어요.');
+  }));
+}
+function usedPass(r) {
+  if (!r.ok) { toast(PASS_FAIL[r.reason]); renderPasses(); return; }
+  save(); render(); renderPasses();
+  toast(r.end ? `${r.end.slice(5)}까지 시험기간 휴식권을 정했어요. 시험 잘 봐요!` : '푹 쉬고 와요. 오늘은 체력이 줄지 않아요.');
 }
 function restart() {
   pendingOffset = S ? S.offset : 0;
@@ -286,8 +335,8 @@ const ctx = $('cv').getContext('2d');
 function frame(t) {
   let pet, preview = false;
   if (S) pet = S.pet;
-  else { const st = statsFromInputs(formInputs()); pet = { line: lineFromStats(st), xp: 0, hp: RULES.startHp, alive: true, height: st.height }; preview = true; }
-  draw(ctx, pet, t, { preview, cheer: performance.now() < cheerUntil });
+  else { const st = statsFromInputs(formInputs()); pet = { line: lineFromStats(st), xp: 0, hp: RULES.startHp, height: st.height }; preview = true; }
+  draw(ctx, pet, t, { preview, cheer: performance.now() < cheerUntil, resting: !!S && !!restPassOn(S, today()) });
 }
 if (matchMedia('(prefers-reduced-motion: reduce)').matches) setInterval(() => frame(performance.now()), 500);
 else { const loop = t => { frame(t); requestAnimationFrame(loop); }; requestAnimationFrame(loop); }
@@ -323,10 +372,13 @@ $('bCreate').onclick = () => {
 };
 $('bSetupCancel').onclick = () => { $('setup').hidden = true; openPanel('infoPanel'); };
 $('bRemeasure').onclick = () => openSetup('remeasure');
+$('bRestart').onclick = () => { if (confirm('지금 튼튼몬의 기록이 모두 사라져요. 정말 다시 시작할까요?')) { closePanels(); restart(); } };
 $('bNext').onclick = () => {
   S.offset++; const n = evaluate(S, today()); save(); render();
   const L = S.logs[addDay(today(), -1)];
-  if (!S.pet.alive) toast('체력이 0이 되어 소멸했어요.');
+  if (n.includes('튼튼몬이 잠들었어요')) toast('체력이 0이 되어 잠들었어요. 운동 한 번이면 깨어나요!');
+  else if (S.pet.sleeping) toast('하루 지남 · 쿨쿨 자는 중');
+  else if (L && L.status === 'pass') toast(`어제는 휴식권으로 쉬었어요.${n.length ? ' · ' + n.join(', ') : ''}`);
   else if (L && L.status === 'rest') toast(`어제는 휴식일로 봐 줬어요.${n.length ? ' · ' + n.join(', ') : ''}`);
   else toast(n.length ? `하루 지남 · ${n.join(', ')}` : '하루 지남 · 잘 지켰어요!');
 };
@@ -337,4 +389,4 @@ $('bResetYes').onclick = () => { $('resetConfirm').hidden = true; restart(); };
 if (S) { const n = evaluate(S, today()); save(); if (n.length) toast(`없던 동안: ${n.join(', ')}`); }
 $('setup').hidden = !!S;
 render();
-setInterval(() => { if (S && S.pet.alive && S.lastEval < today()) { evaluate(S, today()); save(); render(); } }, 60000);
+setInterval(() => { if (S && S.lastEval < today()) { evaluate(S, today()); save(); render(); } }, 60000);
