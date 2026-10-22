@@ -8,13 +8,14 @@ import {
   restPassOn, passesLeft, useSickPass, useExamPass, cancelExamPass,
   questOf, questCoin, todayQuests, completeQuest, dayStreak,
   dexEntries, itemOf, buyItem, wearItem, takeOff, wearLook, pendingAnniversaries, celebrate, pickLine, dayRnd, greeting,
+  keepOnRestart, applyKeep,
 } from './game.js';
 import { LOW_HP_WARN, EXAM_REST_MAX_DAYS, DAILY_ALL_CLEAR_BONUS, QUEST_CHEER_MS } from './config/game.js';
 import { ITEMS, ITEM_CATEGORIES } from './config/items.js';
 import { INDOOR_KINDS } from './config/dialogues.js';
 import { STAGE_LABEL } from './config/dex.js';
 import { draw } from './draw.js';
-import { load, save as store, clear } from './storage.js';
+import { load, save as store, clear, saveKeep, loadKeep } from './storage.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -299,8 +300,9 @@ function showAnniversary() {
   if (!S || !$('annModal').hidden) return;
   const a = pendingAnniversaries(S, today())[0];
   if (!a) return;
+  const had = !!a.item && S.items.owned.includes(a.item); // 다시 시작한 튼튼몬은 같은 선물을 이미 가지고 있을 수 있음
   celebrate(S, today(), a); save(); // 보여 주는 순간 선물을 넣음 (창을 닫아도 받음)
-  const it = a.item && itemOf(a.item);
+  const it = a.item && !had && itemOf(a.item);
   $('annTitle').textContent = a.type === 'day' ? `${S.pet.name}(이)와 함께한 지 ${a.n}일!` : `연속 기록 ${a.n}일 달성!`;
   $('annText').textContent = a.type === 'day' ? `알을 받은 날부터 ${a.n}일째예요. 늘 함께해 줘서 고마워요!` : `${a.n}일 동안 꾸준히 해냈어요. 정말 대단해요!`;
   $('annGift').textContent = it ? `기념 선물: ${it.icon} ${it.name} — 꾸미기에서 써 보세요` : '';
@@ -444,8 +446,10 @@ function usedPass(r) {
   save(); render(); renderPasses();
   toast(r.end ? `${r.end.slice(5)}까지 시험기간 휴식권을 정했어요. 시험 잘 봐요!` : '푹 쉬고 와요. 오늘은 체력이 줄지 않아요.');
 }
-function restart() {
+/** 새 알로 다시 시작. keep = 도감·꾸미기·코인을 남길지 (체험용 "처음부터 다시"는 모두 지움) */
+function restart(keep = true) {
   pendingOffset = S ? S.offset : 0;
+  if (keep) saveKeep(keepOnRestart(S)); else saveKeep(null);
   S = null; clear(); render();
   $('setup').scrollIntoView({ behavior: 'smooth' });
 }
@@ -488,7 +492,8 @@ $('bCreate').onclick = () => {
     toast('새 PAPS·인바디 기록으로 바꿨어요.'); return;
   }
   const t = todayKey(pendingOffset);
-  S = newState(newPet($('sName').value, statsFromInputs(formInputs()), t), t, pendingOffset);
+  S = applyKeep(newState(newPet($('sName').value, statsFromInputs(formInputs()), t), t, pendingOffset), loadKeep());
+  saveKeep(null);
   save(); $('setup').hidden = true; render();
   say(`${S.pet.name}의 ${LINES[S.pet.line].n} 알을 받았어요! 운동이나 식단을 인증하면 깨어나요.`, true);
 };
@@ -498,7 +503,7 @@ $('questPhoto').onchange = onQuestPhoto;
 $('kDex').onclick = () => openPanel('dexPanel');
 $('kShop').onclick = () => openPanel('shopPanel');
 $('annOk').onclick = () => { $('annModal').hidden = true; showAnniversary(); }; // 남은 기념일이 있으면 이어서
-$('bRestart').onclick = () => { if (confirm('지금 튼튼몬의 기록이 모두 사라져요. 정말 다시 시작할까요?')) { closePanels(); restart(); } };
+$('bRestart').onclick = () => { if (confirm('지금 튼튼몬은 새 알로 돌아가요. 도감과 꾸미기 아이템, 코인은 그대로 남아요. 다시 시작할까요?')) { closePanels(); restart(true); } };
 $('bNext').onclick = () => {
   S.offset++; const n = evaluate(S, today()); save(); render();
   const L = S.logs[addDay(today(), -1)];
@@ -510,7 +515,7 @@ $('bNext').onclick = () => {
 };
 $('bReset').onclick = () => { $('demo').hidden = true; $('resetConfirm').hidden = false; };
 $('bResetNo').onclick = () => { $('resetConfirm').hidden = true; $('demo').hidden = false; };
-$('bResetYes').onclick = () => { $('resetConfirm').hidden = true; restart(); };
+$('bResetYes').onclick = () => { $('resetConfirm').hidden = true; restart(false); }; // 체험용: 모두 지움
 
 if (S) { const n = evaluate(S, today()); save(); if (n.length) toast(`없던 동안: ${n.join(', ')}`); }
 const hello = S && greeting(S, today(), new Date().getHours()); // 그날 첫 접속 인사 (오래 안 왔으면 반겨 주기)

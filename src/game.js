@@ -201,6 +201,19 @@ export function newState(pet, today, offset = 0) {
   };
 }
 
+/** 처음부터 다시 시작할 때 남기는 것: 도감 · 꾸미기 아이템(쓰던 것 포함) · 코인. 튼튼몬·경험치·기록은 새로 */
+export function keepOnRestart(S) {
+  return S ? { coins: S.coins || 0, dex: [...(S.dex || [])], items: JSON.parse(JSON.stringify(S.items || emptyItems())) } : null;
+}
+/** 새 알 상태에 남긴 것을 옮겨 담는다 (도감은 합침) */
+export function applyKeep(S, keep) {
+  if (!keep) return S;
+  S.coins = keep.coins || 0;
+  S.dex = [...new Set([...(keep.dex || []), ...(S.dex || [])])];
+  S.items = { owned: [...((keep.items && keep.items.owned) || [])], wear: { ...((keep.items && keep.items.wear) || {}) } };
+  return S;
+}
+
 /** PAPS·인바디를 다시 쟀을 때: 새 기준값 + 그동안 운동으로 오른 만큼. 계통은 그대로 */
 export function remeasure(S, f) {
   const st = statsFromInputs(f), p = S.pet;

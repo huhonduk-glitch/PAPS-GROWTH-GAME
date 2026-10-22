@@ -6,6 +6,7 @@ import {
   termOf, passesLeft, useSickPass, useExamPass, cancelExamPass, restPassOn,
   SAVE_VERSION, questOf, questCoin, pickQuests, todayQuests, completeQuest, dayStreak,
   dexEntries, buyItem, wearItem, takeOff, wearLook, itemOf, pendingAnniversaries, celebrate, pickLine, dayRnd, greeting,
+  keepOnRestart, applyKeep,
 } from '../src/game.js';
 import { ITEMS, ITEM_CATEGORIES } from '../src/config/items.js';
 import { DIALOGUES } from '../src/config/dialogues.js';
@@ -14,7 +15,7 @@ import {
   ANNIVERSARY_DAYS, ANNIVERSARY_GIFTS,
 } from '../src/config/game.js';
 import { QUESTS, QUEST_CATEGORIES } from '../src/config/quests.js';
-import { load, save, clear, KEY } from '../src/storage.js';
+import { load, save, clear, KEY, saveKeep, loadKeep } from '../src/storage.js';
 
 const D0 = '2026-10-12'; // 월요일
 const F = (over = {}) => ({ cardio: 3, strength: 2, flex: 4, power: 3, height: 163, ...over });
@@ -557,6 +558,27 @@ describe('꾸미기', () => {
   });
 });
 
+describe('처음부터 다시 시작', () => {
+  it('도감·꾸미기(쓰던 것 포함)·코인은 남고, 튼튼몬·경험치·기록·기념일은 새로', () => {
+    const S = base(); S.coins = 30; S.pet.xp = 950; ex(S, D0, 30);
+    buyItem(S, 'hat_cap'); wearItem(S, 'hat_cap'); celebrate(S, D0, { id: 'day7', item: 'hat_ribbon' });
+    const keep = keepOnRestart(S);
+    const T = applyKeep(newState(newPet('새알', statsFromInputs(F({ cardio: 1 })), addDay(D0, 3)), addDay(D0, 3)), JSON.parse(JSON.stringify(keep)));
+    expect(T.coins).toBe(S.coins);
+    expect(T.items).toEqual({ owned: ['hat_cap', 'hat_ribbon'], wear: { hat: 'hat_cap' } });
+    expect(T.dex).toEqual(expect.arrayContaining([...S.dex, `0-${T.pet.line}`]));
+    expect(new Set(T.dex).size).toBe(T.dex.length);
+    expect(T.pet).toMatchObject({ xp: 0, name: '새알' });
+    expect(T.logs).toEqual({});
+    expect(T.anniv).toEqual({});
+  });
+  it('남길 것이 없으면 그대로', () => {
+    const T = base();
+    expect(applyKeep(T, null)).toBe(T);
+    expect(keepOnRestart(null)).toBeNull();
+  });
+});
+
 describe('기념일', () => {
   it(`DAY ${ANNIVERSARY_DAYS.join('·')} 기념일 — 지나간 것도 늦게 챙김, 한 번만`, () => {
     const S = base();
@@ -681,6 +703,15 @@ describe('예전 저장(v1) 옮기기', () => {
 
 describe('저장', () => {
   const mem = () => { const m = new Map(); return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: k => m.delete(k) }; };
+  it('다시 시작 보관함: 튼튼몬 저장을 지워도 남고, 비우면 사라짐', () => {
+    const st = mem(); const S = base(); S.coins = 9;
+    save(S, st);
+    saveKeep(keepOnRestart(S), st); clear(st);
+    expect(load(st)).toBeNull();
+    expect(loadKeep(st)).toMatchObject({ coins: 9 });
+    saveKeep(null, st);
+    expect(loadKeep(st)).toBeNull();
+  });
   it('저장 → 불러오기 → 지우기', () => {
     const st = mem(); const S = base();
     expect(save(S, st)).toBe(true);
