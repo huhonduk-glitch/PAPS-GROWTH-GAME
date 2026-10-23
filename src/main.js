@@ -16,6 +16,7 @@ import { INDOOR_KINDS } from './config/dialogues.js';
 import { STAGE_LABEL } from './config/dex.js';
 import { draw } from './draw.js';
 import { load, save as store, clear, saveKeep, loadKeep } from './storage.js';
+import { readCode, codeError, measuredText } from './pelog.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -36,7 +37,7 @@ function save() { if (!store(S)) toast('이 브라우저에서는 저장이 안 
 
 /* ---------- 만들기 · 다시 재기 ---------- */
 function formInputs() {
-  const g = id => Number($(id).value);
+  const g = id => Number($(id).value) || 3; // 빈칸(PE LOG 기록 없음)은 미리보기에서만 3으로 — 알 받기 전에 꼭 고르게 함
   return { cardio: g('sCardio'), strength: g('sStr'), flex: g('sFlex'), power: g('sPow'), height: parseFloat($('sH').value), weight: parseFloat($('sW').value), muscle: parseFloat($('sM').value) };
 }
 function renderLineBox() {
@@ -56,6 +57,87 @@ function openSetup(mode) {
   $('bSetupCancel').hidden = mode === 'new';
   closePanels(); $('setup').hidden = false; renderLineBox();
   if (mode !== 'new') $('setup').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* ---------- PE LOG 코드로 등급 불러오기 (서버 없음 · 코드에는 등급·측정일만) ---------- */
+const GRADE_SELECTS = { cardio: 'sCardio', strength: 'sStr', flex: 'sFlex', power: 'sPow' };
+const GRADE_NAMES = { cardio: '심폐지구력', strength: '근력·근지구력', flex: '유연성', power: '순발력' };
+function pelogMsg(text, warn = false) { $('pelogMsg').textContent = text; $('pelogMsg').classList.toggle('warn', warn); }
+/** 코드를 읽어 등급 칸을 채운다. 빈칸 등급은 학생이 고르게 비워 두고, 채운 등급도 고칠 수 있음 */
+function applyCode(text, fromQr = false) {
+  const r = readCode(text);
+  if (!r.ok) { pelogMsg(codeError(r.reason, fromQr), true); $('pelogCode').focus(); return false; }
+  $('pelogCode').value = String(text).toUpperCase().trim();
+  const blank = [];
+  Object.entries(GRADE_SELECTS).forEach(([k, id]) => {
+    const g = r.grades[k], label = $(id).closest('label');
+    $(id).value = g ? String(g) : '';
+    label.classList.toggle('fromcode', !!g);
+    label.classList.toggle('need', !g);
+    if (!g) blank.push(GRADE_NAMES[k]);
+  });
+  pelogMsg(`${measuredText(r.date)}. 등급을 채웠어요. 틀렸으면 아래에서 직접 고쳐도 돼요.${blank.length ? ` ${blank.join(', ')} 등급은 기록이 없어요. 직접 골라 주세요.` : ''}`);
+  renderLineBox();
+  (blank.length ? $(GRADE_SELECTS[Object.keys(GRADE_NAMES).find(k => !r.grades[k])]) : $('sH')).focus();
+  return true;
+}
+/** 빈칸인 등급 이름들 (알 받기 전에 확인) */
+const blankGrades = () => Object.entries(GRADE_SELECTS).filter(([, id]) => $(id).value === '').map(([k]) => GRADE_NAMES[k]);
+
+let scan = null; // QR 찍는 중 {stream, on}
+/** QR 읽는 방법: 브라우저 기능(BarcodeDetector)이 있으면 그것, 없으면(아이폰 등) jsQR 을 그때 불러옴 */
+async function qrReader() {
+  if ('BarcodeDetector' in window) {
+    try {
+      if ((await window.BarcodeDetector.getSupportedFormats()).includes('qr_code')) {
+        const bd = new window.BarcodeDetector({ formats: ['qr_code'] });
+        return async v => { const found = await bd.detect(v); return found[0] ? found[0].rawValue : null; };
+      }
+    } catch { /* 아래 jsQR 로 */ }
+  }
+  const { default: jsQR } = await import('jsqr');
+  const c = document.createElement('canvas'), x = c.getContext('2d', { willReadFrequently: true });
+  return async v => {
+    if (!v.videoWidth) return null;
+    const w = 480, h = Math.round(v.videoHeight * w / v.videoWidth);
+    c.width = w; c.height = h; x.drawImage(v, 0, 0, w, h);
+    const r = jsQR(x.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
+    return r ? r.data : null;
+  };
+}
+const CAM_FAIL = {
+  NotAllowedError: '카메라 권한을 허용하지 않았어요. 코드를 직접 입력해 주세요. (다시 찍으려면 브라우저 설정에서 카메라를 허용해요)',
+  SecurityError: '카메라 권한을 허용하지 않았어요. 코드를 직접 입력해 주세요.',
+  NotReadableError: '다른 앱이 카메라를 쓰고 있어요. 코드를 직접 입력해 주세요.',
+};
+async function startScan() {
+  if (scan) return;
+  if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { pelogMsg('이 기기에서는 카메라를 쓸 수 없어요. 코드를 직접 입력해 주세요.', true); $('pelogCode').focus(); return; }
+  pelogMsg('카메라 권한을 물어보면 "허용"을 눌러 주세요.');
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }); } catch (e) {
+    pelogMsg(CAM_FAIL[e && e.name] || '카메라를 찾을 수 없어요. 코드를 직접 입력해 주세요.', true); $('pelogCode').focus(); return;
+  }
+  scan = { stream, on: true };
+  const v = $('qrVideo');
+  v.srcObject = stream; v.hidden = false; $('bQrStop').hidden = false; $('bQr').hidden = true;
+  pelogMsg('QR을 네모 안에 비춰 주세요.');
+  try {
+    await v.play();
+    const read = await qrReader();
+    const tick = async () => {
+      if (!scan || !scan.on) return;
+      const text = await read(v).catch(() => null);
+      if (text) { stopScan(); applyCode(text, true); return; }
+      setTimeout(tick, 250);
+    };
+    tick();
+  } catch { stopScan(); pelogMsg('QR을 읽을 수 없어요. 코드를 직접 입력해 주세요.', true); }
+}
+function stopScan() {
+  if (scan) { scan.on = false; scan.stream.getTracks().forEach(t => t.stop()); scan = null; }
+  const v = $('qrVideo'); v.pause(); v.srcObject = null; v.hidden = true;
+  $('bQrStop').hidden = true; $('bQr').hidden = false;
 }
 
 /* ---------- 운동 인증 ---------- */
@@ -486,7 +568,22 @@ $('bEx').onclick = onCertEx; $('bMeal').onclick = onCertMeal;
 $('exPhoto').onchange = e => { const f = e.target.files[0]; if (f) shrinkPhoto(f, ph => { photos.ex = ph; $('exPrev').src = ph.data; $('exPrev').hidden = false; renderExCalc(); }); };
 $('mealPhoto').onchange = e => { const f = e.target.files[0]; if (f) shrinkPhoto(f, ph => { photos.meal = ph; $('mealPrev').src = ph.data; $('mealPrev').hidden = false; renderMealCalc(); }); };
 ['sCardio', 'sStr', 'sFlex', 'sPow', 'sH', 'sW', 'sM'].forEach(id => $(id).addEventListener('input', renderLineBox));
+// 학생이 등급을 직접 고치면 "불러옴/골라요" 표시를 지움
+Object.values(GRADE_SELECTS).forEach(id => $(id).addEventListener('change', () => $(id).closest('label').classList.remove('fromcode', 'need')));
+$('bPelog').onclick = () => {
+  const open = $('pelogBox').hidden;
+  $('pelogBox').hidden = !open; $('bPelog').setAttribute('aria-expanded', open);
+  if (open) $('pelogCode').focus(); else stopScan();
+};
+$('bPelogRead').onclick = () => applyCode($('pelogCode').value);
+$('pelogCode').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyCode($('pelogCode').value); } });
+$('pelogCode').addEventListener('input', () => { const el = $('pelogCode'), up = el.value.toUpperCase(); if (el.value !== up) el.value = up; });
+$('bQr').onclick = startScan;
+$('bQrStop').onclick = () => { stopScan(); pelogMsg('코드를 직접 입력해도 돼요.'); };
 $('bCreate').onclick = () => {
+  const blank = blankGrades();
+  if (blank.length) { toast(`${blank.join(', ')} 등급을 골라 주세요.`); $(GRADE_SELECTS[Object.keys(GRADE_NAMES).find(k => blank.includes(GRADE_NAMES[k]))]).focus(); return; }
+  stopScan();
   if (setupMode === 'remeasure' && S) {
     remeasure(S, formInputs()); save(); $('setup').hidden = true; render(); openPanel('infoPanel');
     toast('새 PAPS·인바디 기록으로 바꿨어요.'); return;
@@ -497,7 +594,7 @@ $('bCreate').onclick = () => {
   save(); $('setup').hidden = true; render();
   say(`${S.pet.name}의 ${LINES[S.pet.line].n} 알을 받았어요! 운동이나 식단을 인증하면 깨어나요.`, true);
 };
-$('bSetupCancel').onclick = () => { $('setup').hidden = true; openPanel('infoPanel'); };
+$('bSetupCancel').onclick = () => { stopScan(); $('setup').hidden = true; openPanel('infoPanel'); };
 $('bRemeasure').onclick = () => openSetup('remeasure');
 $('questPhoto').onchange = onQuestPhoto;
 $('kDex').onclick = () => openPanel('dexPanel');

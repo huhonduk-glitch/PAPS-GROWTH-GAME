@@ -53,12 +53,20 @@
   <section class="card" id="setup">
     <h2 id="setupTitle">내 튼튼몬 만들기</h2>
     <p class="hint">PAPS 종목 등급과 인바디로 튼튼몬의 <b>계통</b>이 정해져요. 가장 강한 체력이 계통이 되고, 고르면 빛 계통이에요.</p>
+    <button class="btn ghost" id="bPelog" type="button" aria-expanded="false">📋 PE LOG 코드로 불러오기</button>
+    <div class="pelog" id="pelogBox" hidden>
+      <label>선생님께 받은 코드 (7글자)<input id="pelogCode" placeholder="예: ABSH-SU4" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done"></label>
+      <div class="btns"><button class="btn" id="bPelogRead" type="button">불러오기</button><button class="btn ghost" id="bQr" type="button">📷 QR 찍기</button></div>
+      <video id="qrVideo" class="qrvideo" playsinline muted hidden></video>
+      <button class="btn ghost small" id="bQrStop" type="button" hidden>찍기 그만</button>
+      <p class="hint" id="pelogMsg" aria-live="polite">코드를 넣거나 QR을 찍으면 등급이 채워져요. 코드에는 0과 O, 1과 I가 없어요.</p>
+    </div>
     <label id="nameRow">이름 (별명)<input id="sName" value="튼튼이" maxlength="8" autocomplete="off"></label>
     <div class="row">
-      <label>심폐지구력 등급<select id="sCardio"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
-      <label>근력·근지구력 등급<select id="sStr"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option></select></label>
-      <label>유연성 등급<select id="sFlex"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option></select></label>
-      <label>순발력 등급<select id="sPow"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
+      <label>심폐지구력 등급<select id="sCardio"><option value="" disabled>골라요</option><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
+      <label>근력·근지구력 등급<select id="sStr"><option value="" disabled>골라요</option><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option></select></label>
+      <label>유연성 등급<select id="sFlex"><option value="" disabled>골라요</option><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option></select></label>
+      <label>순발력 등급<select id="sPow"><option value="" disabled>골라요</option><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
       <label>키 (cm)<input id="sH" type="number" inputmode="decimal" value="163"></label>
       <label>몸무게 (kg, 선택)<input id="sW" type="number" inputmode="decimal" placeholder="예: 55"></label>
       <label>골격근량 (kg, 인바디·선택)<input id="sM" type="number" inputmode="decimal" placeholder="예: 21"></label>

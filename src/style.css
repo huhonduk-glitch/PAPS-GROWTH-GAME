@@ -101,6 +101,14 @@ input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid
 .annfx{font-size:3rem;animation:pop .6s ease-out}
 @keyframes pop{0%{transform:scale(.3)}70%{transform:scale(1.2)}100%{transform:scale(1)}}
 @media (prefers-reduced-motion: reduce){.annfx{animation:none}}
+.pelog{display:flex;flex-direction:column;gap:10px;background:var(--bg);border-radius:12px;padding:12px}
+.pelog input{background:var(--card);font-family:var(--f-px);font-size:1.1rem;letter-spacing:.12em;text-transform:uppercase}
+.pelog .btn{min-height:48px}
+#pelogMsg.warn{color:var(--warn)}
+.qrvideo{width:100%;max-height:280px;object-fit:cover;border-radius:12px;background:#000}
+label.fromcode select{border-color:var(--ok);box-shadow:0 0 0 1px var(--ok)}
+label.need select{border-color:var(--warn);box-shadow:0 0 0 1px var(--warn)}
+label.need{color:var(--warn)}
 .btn.danger{color:var(--warn);border-color:var(--warn);margin-top:6px}
 .booked{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:.88rem}
 .booked .btn{min-height:40px}
