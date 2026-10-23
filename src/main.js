@@ -17,6 +17,7 @@ import { STAGE_LABEL } from './config/dex.js';
 import { draw } from './draw.js';
 import { load, save as store, clear, saveKeep, loadKeep } from './storage.js';
 import { readCode, codeError, measuredText } from './pelog.js';
+import { showDemoButtons } from './demo.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -311,7 +312,8 @@ function moodLine() {
 }
 function render() {
   const has = !!S;
-  $('keys').hidden = !has; $('demo').hidden = !has; $('questCard').hidden = !has; $('subkeys').hidden = !has;
+  $('keys').hidden = !has; $('questCard').hidden = !has; $('subkeys').hidden = !has;
+  $('demo').hidden = !showDemoButtons(has, location.search) || !$('resetConfirm').hidden; // 체험용은 ?demo 주소에서만
   if (!has) {
     $('setup').hidden = false; setupMode = 'new'; openSetupLabels();
     $('petName').textContent = '새 알'; $('stageTxt').textContent = '알'; $('dayTxt').textContent = 'DAY 1'; setBars(RULES.startHp, 0); renderLineBox(); return;
