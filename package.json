@@ -11,7 +11,7 @@
     "icons": "node scripts/make-icons.mjs"
   },
   "devDependencies": {
-    "vite": "8.1.2",
+    "vite": "8.3.5",
     "vite-plugin-pwa": "1.3.0",
     "vitest": "5.0.4"
   },
