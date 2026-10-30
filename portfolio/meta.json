@@ -1,0 +1,24 @@
+{
+  "name": "튼튼몬 키우기",
+  "slug": "papsgame",
+  "tagline": "운동하고 골고루 먹으면 자라는 건강 습관 육성 게임",
+  "story": "운동하고 골고루 먹으면 캐릭터가 자라고, 돌보지 않으면 시드는 건강 습관 게임입니다. 휴대폰 홈 화면에 추가하면 앱처럼 쓸 수 있고 인터넷이 끊겨도 열립니다. PE LOG에서 만든 코드로 PAPS 등급을 불러올 수 있습니다.",
+  "target": [
+    "학생"
+  ],
+  "tags": [
+    "수업"
+  ],
+  "status": "개발 중",
+  "public": true,
+  "appUrl": "https://papsgame.vercel.app",
+  "videoUrl": "확인필요",
+  "preview": "images/preview.gif",
+  "useCases": [
+    "학생이 운동·식습관을 스스로 챙기게 하고 싶을 때",
+    "PAPS 결과를 학생이 재미있게 확인하게 할 때",
+    "방학 중 건강 습관 과제를 줄 때"
+  ],
+  "lesson": "",
+  "order": 2
+}
